@@ -2,6 +2,7 @@
  * Hình học khu đất — DÙNG CHUNG cho bản vẽ, dự toán, PDF:
  * kích thước đất → khoảng lùi trước/sau → diện tích xây dựng (phần nhà chiếm đất) → mật độ.
  */
+import { hasFreeSketch, planFreeLayout } from './sketchFreePlanner.js';
 
 /** Khoảng lùi mặc định (m) khi khách không nhập — giống bộ vẽ mặt bằng */
 export function defaultSetbacks(lengthM: number): { front: number; back: number } {
@@ -72,4 +73,33 @@ export function computeSite(dimensions?: string, frontSetback?: any, backSetback
     houseLengthM: r1(area / w), footprint: r1(area), densityPct: 100, maxDensityPct: maxDensityPct(area), densityOk: true,
     note: `Khách nhập diện tích ${area}m² (không có kích thước rộng × dài) — tạm coi là diện tích xây dựng. Nên nhập dạng "5x20" để tính khoảng lùi & mật độ chính xác.`
   };
+}
+
+/**
+ * Hình học khu đất theo TOÀN BỘ thông tin công trình.
+ * Khi khách xác nhận "vẽ theo phác thảo tự do" (nhà vườn / nhà rộng), diện tích xây dựng
+ * lấy đúng diện tích nhà trên bản vẽ phác thảo → bản vẽ và dự toán luôn cùng một con số.
+ */
+export function computeSiteFor(ct: any): SiteGeometry {
+  const base = computeSite(ct?.dimensions, ct?.frontSetbackM, ct?.backSetbackM);
+  try {
+    const floors = Math.max(1, Math.round(Number(ct?.floors) || 1));
+    if (!hasFreeSketch(ct?.rooms, 1, floors)) return base;
+    const p = planFreeLayout({ widthM: base.lotWidthM, lengthM: base.lotLengthM, floor: 1, totalFloors: floors, rooms: ct.rooms, desiredDirection: ct?.desiredDirection });
+    // bộ vẽ đã nới ranh đất theo kích thước khách nhập → dùng đúng ranh trên bản vẽ
+    const lotW = p.lot ? p.lot.w : base.lotWidthM;
+    const lotL = p.lot ? p.lot.h : base.lotLengthM;
+    const lotArea = r1(lotW * lotL);
+    const footprint = p.density.footprint;
+    const pct = Math.round(footprint / lotArea * 100);
+    const maxPct = maxDensityPct(lotArea);
+    return {
+      hasDims: true, lotWidthM: r1(lotW), lotLengthM: r1(lotL), lotArea,
+      frontSetbackM: p.frontSetbackM, backSetbackM: p.backSetbackM,
+      houseLengthM: p.houseLengthM, footprint, densityPct: pct, maxDensityPct: maxPct, densityOk: pct <= maxPct,
+      note: `Vẽ theo phác thảo: nhà ${p.widthM}×${p.houseLengthM}m, diện tích xây dựng ${footprint}m² (không tính hiên); đất ~${lotArea}m², phần còn lại làm sân vườn (mật độ ${pct}%, tối đa ~${maxPct}%).`
+    };
+  } catch {
+    return base;
+  }
 }

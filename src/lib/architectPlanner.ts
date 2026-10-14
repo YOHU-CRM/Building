@@ -16,14 +16,21 @@
  */
 
 import { computeArchitecturalLayoutModel } from './architecturalLayoutModel';
+import { hasFreeSketch, planFreeLayout } from './sketchFreePlanner';
 
 export type RoomType =
   | 'living' | 'kitchen' | 'bedroom' | 'master' | 'wc' | 'stair' | 'lightwell' | 'corridor'
-  | 'worship' | 'common' | 'terrace' | 'parking' | 'yard' | 'balcony' | 'storage' | 'garage';
+  | 'worship' | 'common' | 'terrace' | 'parking' | 'yard' | 'balcony' | 'storage' | 'garage'
+  // dùng cho chế độ phác thảo tự do (nhà vườn)
+  | 'dining' | 'porch' | 'pond' | 'garden' | 'outkitchen' | 'walkway' | 'well';
 
 export type Side = 'front' | 'rear' | 'left' | 'right';
 
-export interface PlanDoor { side: Side; at: number; width: number; main?: boolean; }
+export interface PlanDoor {
+  side: Side; at: number; width: number; main?: boolean; rolling?: boolean;
+  open?: boolean;     // ô mở thông (không cánh) giữa 2 không gian chung
+  service?: boolean;  // cửa phụ ra bếp phụ / vườn
+}
 export interface PlanItem {
   kind: 'sofa' | 'tv' | 'bed' | 'wardrobe' | 'dining' | 'counter' | 'stove' | 'sink' | 'fridge' | 'toilet' | 'basin'
   | 'shower' | 'altar' | 'car' | 'moto' | 'plant' | 'washer' | 'desk';
@@ -59,10 +66,16 @@ export interface FloorPlanResult {
   grid: GridCell[];
   checks: PlanCheck[];
   fengShuiNotes: string[];
+  sketchNotes: string[];          // đã giữ / đã điều chỉnh so với phác thảo của khách
   density: { lotArea: number; footprint: number; pct: number; maxPct: number };
   bedroomsThisFloor: number;
   totalBedroomsPlaced: number;
   totalBedroomsRequested: number;
+  /* chế độ phác thảo tự do */
+  mode?: 'strip' | 'free';
+  lot?: { x: number; y: number; w: number; h: number };            // ranh đất (toạ độ nhà)
+  paths?: { pts: [number, number][]; label: string; color: string }[]; // lối vào, lối ra bếp phụ
+  road?: { side: Side; label: string };
 }
 
 export interface PlannerInput {
@@ -147,6 +160,10 @@ const MIN: Record<string, { area: number; width: number }> = {
 
 /* ───────────────────────── LẬP MẶT BẰNG ───────────────────────── */
 export function planFloor(input: PlannerInput): FloorPlanResult {
+  // Phác thảo tự do (nhà vườn, nhà rộng, bố cục không theo dải nhà ống) → vẽ đúng vị trí phòng theo lưới phác thảo
+  if (hasFreeSketch(input.rooms, Math.round(Number(input.floor) || 1), Math.max(1, Math.round(Number(input.totalFloors) || 1)))) {
+    return planFreeLayout(input);
+  }
   const W = clamp(Number(input.widthM) || 5, 2.5, 60);
   const L = clamp(Number(input.lengthM) || 20, 5, 120);
   const floors = Math.max(1, Math.round(Number(input.totalFloors) || 1));
@@ -208,6 +225,12 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   if (W - sw - cw < 1.2) { cw = Math.max(0.9, W - sw - 1.2); wcW = Math.max(1.0, W - sw - cw); }
   const lw = (floors > 1 ? H > 15 : (H > 18 || (H > 15 && W < 8))) ? 1.5 : 0; // giếng trời
 
+  /* ── Phác thảo của khách (AI đọc từ bản vẽ tay) — ưu tiên giữ ý khách nếu hợp lệ ── */
+  const sketch: any = roomsCfg.sketchLayout && roomsCfg.sketchLayout.co_phac_thao !== false ? roomsCfg.sketchLayout : null;
+  const sketchNotes: string[] = [];
+  const skFloor = (f: number): any[] => (sketch?.tang || []).find((t: any) => Number(t.tang) === f)?.phong || [];
+  const skHas = (f: number, loai: string) => skFloor(f).filter((r: any) => String(r.loai) === loai);
+
   // Chọn phía đặt thang: WC (phía còn lại, giữa nhà) ưu tiên cung xấu
   let stairSide: 'left' | 'right' | 'none' = 'none';
   if (hasStair) {
@@ -215,7 +238,15 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
       const stairCol = s === 'left' ? 0 : 2, wcCol = s === 'left' ? 2 : 0;
       return -3 * cellScore(wcCol, 1) - 1 * cellScore(stairCol, 1);
     };
-    stairSide = scoreSide('left') >= scoreSide('right') ? 'left' : 'right';
+    const fsBest: 'left' | 'right' = scoreSide('left') >= scoreSide('right') ? 'left' : 'right';
+    stairSide = fsBest;
+    const want = String(sketch?.vi_tri_thang || '');
+    if (want === 'trai' || want === 'phai') {
+      stairSide = want === 'trai' ? 'left' : 'right';
+      sketchNotes.push(`✓ Giữ cầu thang bên ${want === 'trai' ? 'trái' : 'phải'} như phác thảo${stairSide !== fsBest && hasFs ? ` (phong thủy gợi ý bên ${fsBest === 'left' ? 'trái' : 'phải'} để WC rơi cung xấu — có thể đổi khi thiết kế chi tiết)` : ''}.`);
+    } else if (want === 'giua') {
+      sketchNotes.push(`↺ Phác thảo đặt thang giữa nhà: chuyển thang sát tường ${fsBest === 'left' ? 'trái' : 'phải'} để không chia đôi phòng và tránh "trung cung" — giữa nhà dành cho hành lang/giếng trời.`);
+    }
   }
   const S = stairSide === 'right';                       // lật trục x nếu thang bên phải
   const X = (x: number, w: number) => S ? r1(W - x - w) : r1(x);   // đổi toạ độ theo phía thang
@@ -244,6 +275,18 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   if (floors === 1) { bedsPerFloor[1] = totalBeds; remaining = 0; }
   else {
     for (let f = 1; f <= floors; f++) bedsPerFloor[f] = 0;
+    // Theo phác thảo: số phòng ngủ khách vẽ ở từng tầng (trong giới hạn bố trí đạt chuẩn)
+    if (sketch) {
+      for (let f = 1; f <= floors && remaining > 0; f++) {
+        const want = skHas(f, 'ngu').length;
+        if (!want) continue;
+        const cap = f === 1 ? gfBedCapacity : slotsUpper(f);
+        const take = Math.min(want, cap, remaining);
+        bedsPerFloor[f] = take; remaining -= take;
+        if (take === want) sketchNotes.push(`✓ Tầng ${f}: ${want} phòng ngủ như phác thảo.`);
+        else sketchNotes.push(`↺ Tầng ${f}: phác thảo ${want} phòng ngủ, chỉ xếp được ${take} phòng đạt chuẩn (≥ 9m², cạnh ≥ 2,6m) — phần còn lại chuyển tầng khác.`);
+      }
+    }
     // rải đều tầng 2..n
     let guard = 0;
     while (remaining > 0 && guard++ < 200) {
@@ -254,7 +297,7 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
       if (!placedAny) break;
     }
     // ông bà ở tầng 1 nếu nhà đủ điều kiện và còn phòng chưa xếp, hoặc nhà ≥ 4 phòng ngủ
-    if (gfBedCapacity > 0 && (remaining > 0 || (totalBeds >= 4 && bedsPerFloor[floors] > 0))) {
+    if (!sketch && gfBedCapacity > 0 && (remaining > 0 || (totalBeds >= 4 && bedsPerFloor[floors] > 0))) {
       if (remaining > 0) { bedsPerFloor[1] = 1; remaining--; }
       else { bedsPerFloor[1] = 1; bedsPerFloor[floors]--; }
     }
@@ -308,7 +351,9 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   };
 
   /* ── Sân trước / sân sau ── */
-  const parking = roomsCfg.parkingType || 'yard';
+  const parking = skHas(1, 'gara').length ? 'garage' : (roomsCfg.parkingType || 'yard');
+  if (floor === 1 && skHas(1, 'bep').some((r: any) => r.vi_tri === 'truoc')) sketchNotes.push('↺ Phác thảo đặt bếp phía trước: chuyển bếp ra sau để thoát khói ra sân sau, tránh bếp nhìn thẳng cửa chính.');
+  if (skHas(floor, 'wc').some((r: any) => r.vi_tri === 'giua' && r.ben === 'ca_ngang')) sketchNotes.push('↺ WC giữa nhà trong phác thảo được dời sát tường hông (tránh trung cung, dễ thông gió).');
   let preferredDoorCol: number | null = null;
   if (floor === 1) {
     add({ id: 'front_yard', type: 'yard', name: parking === 'none' ? 'Sân trước' : 'Sân trước · để xe', x: 0, y: -frontSB, w: W, h: frontSB, outside: true });
@@ -416,11 +461,14 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
     livingLen -= extra;
     let y = 0;
     const garageCar = parking === 'garage' && W >= 3.6 && livingLen + extra >= 5.5 + 3.6;
+    if (skHas(1, 'gara').length) sketchNotes.push(garageCar
+      ? '✓ Gara ô tô tầng 1 như phác thảo.'
+      : '↺ Phác thảo có gara ô tô nhưng nhà không đủ chiều sâu phía trước lõi thang (cần ≥ 9,1m) — bố trí chỗ để xe máy.');
     if (garageCar) {
       const gw = W >= 6.2 ? 3.0 : W;
       const gl = 5.5;
-      add({ id: 'garage', type: 'garage', name: 'Gara ô tô', x: W >= 6.2 ? (S ? 0 : W - gw) : 0, y, w: gw, h: gl, doors: [{ side: 'front', at: 0.2, width: gw - 0.4, main: false }],
-        items: [{ kind: 'car', x: (W >= 6.2 ? (S ? 0 : W - gw) : 0) + 0.6, y: 0.4, w: Math.min(1.8, gw - 0.6), h: 4.6 }] });
+      add({ id: 'garage', type: 'garage', name: 'Gara ô tô', x: W >= 6.2 ? (S ? 0 : W - gw) : 0, y, w: gw, h: gl, doors: [{ side: 'front', at: 0.2, width: gw - 0.4, main: false, rolling: true }],
+        items: [{ kind: 'car', x: (W >= 6.2 ? (S ? 0 : W - gw) : 0) + (gw - Math.min(1.8, gw - 0.6)) / 2, y: 0.5, w: Math.min(1.8, gw - 0.6), h: 4.4 }] });
       if (W >= 6.2) {
         add({ id: 'living', type: 'living', name: 'Phòng khách', x: S ? gw : 0, y, w: W - gw, h: livingLen + extra, windows: ['front'] });
         y += livingLen + extra;
@@ -467,6 +515,18 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
       const fScore = cellScore(0, 0) + cellScore(1, 0) + cellScore(2, 0);
       const rScore = cellScore(0, 2) + cellScore(1, 2) + cellScore(2, 2);
       worshipZone = zones === 1 ? 'front' : (rScore > fScore ? 'rear' : 'front');
+      // Theo phác thảo: phòng thờ khách muốn ở trước hay sau
+      let skTho: any = null; let skThoFloor = 0;
+      for (let f = 1; f <= floors; f++) { const t = skHas(f, 'tho')[0]; if (t) { skTho = t; skThoFloor = f; } }
+      if (skTho) {
+        if (zones > 1 && (skTho.vi_tri === 'truoc' || skTho.vi_tri === 'sau')) {
+          const z = skTho.vi_tri === 'truoc' ? 'front' : 'rear';
+          if (z !== worshipZone) sketchNotes.push(`✓ Phòng thờ phía ${skTho.vi_tri === 'truoc' ? 'trước' : 'sau'} như phác thảo (phong thủy gợi ý phía ${worshipZone === 'front' ? 'trước' : 'sau'} có cung tốt hơn).`);
+          else sketchNotes.push(`✓ Phòng thờ phía ${skTho.vi_tri === 'truoc' ? 'trước' : 'sau'} như phác thảo.`);
+          worshipZone = z;
+        }
+        if (skThoFloor !== floors) sketchNotes.push(`↺ Phác thảo đặt phòng thờ ở tầng ${skThoFloor}: chuyển lên tầng ${floors} (tầng trên cùng) để không có phòng ngủ/WC đè lên bàn thờ.`);
+      }
     }
     let bedsToPlace = bedsHere;
 
@@ -674,15 +734,26 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   const worship = rooms.find(r => r.id === 'worship');
   if (worship) {
     const facade = worship.windows[0] || 'front';
-    const walls: Side[] = (['front', 'rear', 'left', 'right'] as Side[]).filter(s => s !== facade && !worship.doors.some(d => d.side === s));
-    const altarBack = walls.length ? walls.sort((a, b) => {
-      const fa = info(sideBearing(opp(a))).good === true ? 1 : 0;
-      const fb = info(sideBearing(opp(b))).good === true ? 1 : 0;
-      return fb - fa;
-    })[0] : opp(facade);
-    const face = opp(altarBack);
+    // Ứng viên vách tựa: vách đặc trước, rồi vách có cửa đi (đặt bàn thờ lệch khỏi cửa). Không tựa vách cửa sổ mặt tiền.
+    const solid: Side[] = (['front', 'rear', 'left', 'right'] as Side[]).filter(s => s !== facade && !worship.doors.some(d => d.side === s));
+    const doorWalls: Side[] = (['front', 'rear', 'left', 'right'] as Side[]).filter(s => s !== facade && worship.doors.some(d => d.side === s));
+    const faceScore = (wall: Side) => { const i = info(sideBearing(opp(wall))); return i.good === null ? 0 : (STAR_RANK[i.star] ?? (i.good ? 1 : -1)); };
+    const pick = (list: Side[]) => list.slice().sort((x, y) => faceScore(y) - faceScore(x))[0];
+    let altarBack: Side = pick(solid) || opp(facade);
+    if (faceScore(altarBack) <= 0 && doorWalls.length) {
+      const dw = pick(doorWalls);
+      if (faceScore(dw) > faceScore(altarBack)) altarBack = dw;
+    }
+    if (faceScore(altarBack) < 0) notes.push('Phòng thờ không có vách đặc nào giúp bàn thờ quay hướng tốt → nên làm vách ngăn gỗ/kính mờ sau bàn thờ để xoay mặt bàn thờ về hướng tốt.');
     const aw = Math.min(1.97, worship.w - 0.6), ad = 0.61; // 1m97 x 61cm (cung Lỗ Ban tốt phổ biến)
-    const ax = altarBack === 'left' ? worship.x + 0.05 : altarBack === 'right' ? worship.x + worship.w - ad - 0.05 : worship.x + (worship.w - aw) / 2;
+    const face = opp(altarBack);
+    const backDoor = worship.doors.find(d => d.side === altarBack);
+    let axCenter = worship.x + (worship.w - aw) / 2;
+    if (backDoor && (altarBack === 'front' || altarBack === 'rear')) {
+      const doorMid = worship.x + backDoor.at + backDoor.width / 2;
+      axCenter = doorMid < worship.x + worship.w / 2 ? worship.x + worship.w - aw - 0.1 : worship.x + 0.1;
+    }
+    const ax = altarBack === 'left' ? worship.x + 0.05 : altarBack === 'right' ? worship.x + worship.w - ad - 0.05 : axCenter;
     const ay = altarBack === 'front' ? worship.y + 0.05 : altarBack === 'rear' ? worship.y + worship.h - ad - 0.05 : worship.y + (worship.h - aw) / 2;
     const horizontal = altarBack === 'front' || altarBack === 'rear';
     worship.items.push({ kind: 'altar', x: ax, y: ay, w: horizontal ? aw : ad, h: horizontal ? ad : Math.min(aw, worship.h - 0.4), facing: face, note: 'Bàn thờ 197×61' });
@@ -775,7 +846,7 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   return {
     widthM: W, lengthM: L, houseLengthM: H, frontSetbackM: frontSB, backSetbackM: backSB,
     floor, totalFloors: floors, facing, facingDeg: D, northPageDeg, stairSide,
-    rooms, grid, checks, fengShuiNotes: notes,
+    rooms, grid, checks, fengShuiNotes: notes, sketchNotes,
     density: { lotArea, footprint, pct, maxPct },
     bedroomsThisFloor: bedsHere, totalBedroomsPlaced: placedTotal, totalBedroomsRequested: totalBeds
   };

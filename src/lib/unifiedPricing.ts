@@ -12,7 +12,7 @@ import {
   StructuralOptionKey,
   FinishingPackageKey
 } from './boqEngine.js';
-import { computeSite, SiteGeometry } from './siteGeometry.js';
+import { computeSiteFor, SiteGeometry } from './siteGeometry.js';
 
 export const PRICING_VERSION = '2026.10b';
 
@@ -70,7 +70,8 @@ export function getUnifiedEstimate(input: PricingInput): FullProjectEstimateResu
 } {
   const ct = input.constructionInfo || {};
   // Kích thước khách nhập là kích thước ĐẤT → trừ khoảng lùi ra diện tích xây dựng (giống bản vẽ)
-  const site = computeSite(ct.dimensions, ct.frontSetbackM, ct.backSetbackM);
+  // Vẽ theo phác thảo tự do (nhà vườn) → diện tích xây dựng = diện tích nhà trên bản vẽ phác thảo
+  const site = computeSiteFor(ct);
   const floors = Math.max(1, Math.min(50, Math.round(Number(ct.floors) || 1)));
   const address = resolveAddress(ct, input.userInfo);
   const est = calculateMasterProjectEstimate({

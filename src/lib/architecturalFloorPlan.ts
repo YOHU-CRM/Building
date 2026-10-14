@@ -35,7 +35,8 @@ const f2 = (n: number) => n.toFixed(2).replace('.', ',');
 const FILL: Record<string, string> = {
   living: '#fff7e6', kitchen: '#ecfdf5', bedroom: '#eff6ff', master: '#e0ecff', wc: '#e0f2fe', stair: '#f1f5f9',
   lightwell: '#dcfce7', corridor: '#fafafa', worship: '#fef3c7', common: '#f5f3ff', terrace: '#f0fdf4',
-  parking: '#f8fafc', yard: '#f8fafc', balcony: '#f8fafc', storage: '#f4f4f5', garage: '#f1f5f9'
+  parking: '#f8fafc', yard: '#f8fafc', balcony: '#f8fafc', storage: '#f4f4f5', garage: '#f1f5f9',
+  dining: '#fff1f2', porch: '#fefce8', pond: '#bfdbfe', garden: '#dcfce7', outkitchen: '#ffedd5', walkway: '#f5f5f4', well: '#e0f2fe'
 };
 
 function wrap(text: string, max: number): string[] {
@@ -71,12 +72,15 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   /* ── Bố cục trang ── */
   const VW = 1120;
   const drawL = 70, drawT = 130, drawMaxW = 600, drawMaxH = 900;
-  const sc = Math.min(drawMaxW / (W + 0.0001), drawMaxH / L);
-  const dW = W * sc, dH = L * sc;
+  const free = plan.mode === 'free';
+  // Ranh đất: nhà ống = rộng W, từ sân trước đến sân sau; phác thảo tự do = ranh tính theo sân vườn quanh nhà
+  const LOT = plan.lot || { x: 0, y: -FS, w: W, h: L };
+  const sc = Math.min(drawMaxW / (LOT.w + 0.0001), drawMaxH / LOT.h);
+  const dW = LOT.w * sc, dH = LOT.h * sc;
   const ox = drawL + (drawMaxW - dW) / 2;
   const oy = drawT;
-  const px = (x: number) => ox + x * sc;
-  const py = (y: number) => oy + (H + BS - y) * sc; // y = 0 mặt tiền nhà ở phía dưới
+  const px = (x: number) => ox + (x - LOT.x) * sc;
+  const py = (y: number) => oy + (LOT.y + LOT.h - y) * sc; // y = 0 mặt tiền nhà ở phía dưới
   const rx = (r: { x: number; y: number; w: number; h: number }) => ({ X: px(r.x), Y: py(r.y + r.h), Wd: r.w * sc, Ht: r.h * sc });
   const fs = Math.max(9, Math.min(14, sc * 0.33));
 
@@ -87,19 +91,21 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   out.push(`<rect x="0" y="0" width="${VW}" height="96" fill="#0f172a"/>`);
   out.push(`<text x="28" y="40" fill="#fbbf24" font-size="13" font-weight="800" letter-spacing="2">YOHU CONSTECH · BẢN VẼ KIẾN TRÚC SƠ BỘ</text>`);
   out.push(`<text x="28" y="70" fill="#fff" font-size="22" font-weight="900">MẶT BẰNG TẦNG ${plan.floor}/${plan.totalFloors} — ${esc(ctype.toUpperCase())}</text>`);
-  out.push(`<text x="${VW - 28}" y="40" fill="#cbd5e1" font-size="12" text-anchor="end">Lô đất ${f1(W)} × ${f1(L)} m · ${f1(W * L)} m²</text>`);
-  out.push(`<text x="${VW - 28}" y="62" fill="#cbd5e1" font-size="12" text-anchor="end">Nhà ${f1(W)} × ${f1(H)} m · sàn ${f1(W * H)} m² · hướng ${esc(plan.facing)}</text>`);
+  out.push(`<text x="${VW - 28}" y="40" fill="#cbd5e1" font-size="12" text-anchor="end">Lô đất ${free ? '~' : ''}${f1(LOT.w)} × ${f1(LOT.h)} m · ${f1(LOT.w * LOT.h)} m²</text>`);
+  out.push(`<text x="${VW - 28}" y="62" fill="#cbd5e1" font-size="12" text-anchor="end">Nhà ${f1(W)} × ${f1(H)} m · sàn ${f1(free ? plan.density.footprint : W * H)} m² · hướng ${esc(plan.facing)}</text>`);
   out.push(`<text x="${VW - 28}" y="84" fill="#94a3b8" font-size="11" text-anchor="end">Gia chủ: ${esc(customer)}</text>`);
 
   /* ── Ranh đất ── */
-  out.push(`<rect x="${px(0)}" y="${py(H + BS)}" width="${dW}" height="${dH}" fill="#ffffff" stroke="#64748b" stroke-width="1.2" stroke-dasharray="8 5"/>`);
+  out.push(`<rect x="${px(LOT.x)}" y="${py(LOT.y + LOT.h)}" width="${dW}" height="${dH}" fill="${free ? '#f7fee7' : '#ffffff'}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="8 5"/>`);
 
   /* ── Phòng ── */
   const inside = plan.rooms.filter(r => !r.outside);
   const outsideRooms = plan.rooms.filter(r => r.outside);
   outsideRooms.forEach(r => {
     const { X, Y, Wd, Ht } = rx(r);
-    out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" fill="${FILL[r.type] || '#f8fafc'}" stroke="#94a3b8" stroke-width="1" ${r.type === 'balcony' ? 'stroke-dasharray="5 4"' : ''}/>`);
+    if (r.type === 'pond') { out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" rx="${Math.min(Wd, Ht) / 3}" fill="${FILL.pond}" stroke="#60a5fa" stroke-width="1.2"/>`); return; }
+    const dash = r.type === 'balcony' || r.type === 'porch' || r.type === 'walkway' || r.type === 'garden' ? 'stroke-dasharray="5 4"' : '';
+    out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" fill="${FILL[r.type] || '#f8fafc'}" stroke="${r.type === 'outkitchen' ? '#9a3412' : '#94a3b8'}" stroke-width="${r.type === 'outkitchen' ? 1.6 : 1}" ${dash}/>`);
   });
   inside.forEach(r => {
     const { X, Y, Wd, Ht } = rx(r);
@@ -187,9 +193,10 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
         out.push(`<path d="M ${cx} ${cy} L ${cx + d[0]} ${cy + d[1]}" stroke="#b45309" stroke-width="1.6" marker-end="url(#arrowA)"/>`);
         break;
       }
-      case 'car': out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" rx="8" fill="#e2e8f0" ${st}/><text x="${X + Wd / 2}" y="${Y + Ht / 2}" font-size="${fs - 3}" text-anchor="middle" fill="#475569">Ô TÔ</text>`); break;
+      case 'car': out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" rx="8" fill="#e2e8f0" ${st}/><rect x="${X + Wd * 0.15}" y="${Y + Ht * 0.12}" width="${Wd * 0.7}" height="${Ht * 0.18}" rx="3" fill="#cbd5e1"/>`); break;
       case 'moto': out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" rx="4" fill="#e2e8f0" ${st}/><text x="${X + Wd / 2}" y="${Y + Ht / 2 + 3}" font-size="${fs - 5}" text-anchor="middle" fill="#475569">XE MÁY</text>`); break;
       case 'plant': out.push(`<circle cx="${X + Wd / 2}" cy="${Y + Ht / 2}" r="${Math.min(Wd, Ht) / 2}" fill="#86efac" stroke="#16a34a"/>`); break;
+      case 'desk': out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" fill="#fef9c3" ${st}/>`); break;
       case 'washer': out.push(`<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" fill="#fff" ${st}/><circle cx="${X + Wd / 2}" cy="${Y + Ht / 2}" r="${Math.min(Wd, Ht) / 3}" fill="none" ${st}/>`); break;
       default: break;
     }
@@ -197,7 +204,28 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   if (showFurniture) plan.rooms.forEach(r => r.items.forEach(item));
 
   /* ── Tường bao ── */
-  out.push(`<rect x="${px(0)}" y="${py(H)}" width="${dW}" height="${H * sc}" fill="none" stroke="#0f172a" stroke-width="5"/>`);
+  if (!free) out.push(`<rect x="${px(0)}" y="${py(H)}" width="${W * sc}" height="${H * sc}" fill="none" stroke="#0f172a" stroke-width="5"/>`);
+  else {
+    // tường ngoài: phần cạnh phòng không giáp phòng trong nhà khác (hiên không tường)
+    const walled = inside.filter(r => r.type !== 'porch');
+    walled.forEach(r => {
+      (['front', 'rear', 'left', 'right'] as Side[]).forEach(sd => {
+        const horiz = sd === 'front' || sd === 'rear';
+        let parts: [number, number][] = [horiz ? [r.x, r.x + r.w] : [r.y, r.y + r.h]];
+        walled.forEach(o => {
+          if (o === r) return;
+          const touch = sd === 'front' ? Math.abs(r.y - (o.y + o.h)) < 0.05 : sd === 'rear' ? Math.abs(r.y + r.h - o.y) < 0.05 : sd === 'left' ? Math.abs(r.x - (o.x + o.w)) < 0.05 : Math.abs(r.x + r.w - o.x) < 0.05;
+          if (!touch) return;
+          const a = horiz ? o.x : o.y, b = horiz ? o.x + o.w : o.y + o.h;
+          parts = parts.flatMap(([p0, p1]) => { const res: [number, number][] = []; if (a > p0) res.push([p0, Math.min(p1, a)]); if (b < p1) res.push([Math.max(p0, b), p1]); return res; }).filter(([p0, p1]) => p1 - p0 > 0.01);
+        });
+        parts.forEach(([p0, p1]) => {
+          if (horiz) { const yy = py(sd === 'front' ? r.y : r.y + r.h); out.push(`<line x1="${px(p0)}" y1="${yy}" x2="${px(p1)}" y2="${yy}" stroke="#0f172a" stroke-width="5" stroke-linecap="square"/>`); }
+          else { const xx = px(sd === 'left' ? r.x : r.x + r.w); out.push(`<line x1="${xx}" y1="${py(p0)}" x2="${xx}" y2="${py(p1)}" stroke="#0f172a" stroke-width="5" stroke-linecap="square"/>`); }
+        });
+      });
+    });
+  }
 
   /* ── Cửa sổ ── */
   const winSeg = (r: PlanRoom, side: Side) => {
@@ -215,16 +243,28 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   };
   inside.forEach(r => r.windows.forEach(s => winSeg(r, s)));
 
+  const halo = 'stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round"';
   /* ── Cửa đi (khoảng hở + cánh mở) ── */
   const doorDraw = (r: PlanRoom) => {
     const { X, Y, Wd, Ht } = rx(r);
     r.doors.forEach(d => {
       const w = d.width * sc, at = d.at * sc;
-      const col = d.main ? '#dc2626' : '#0f172a';
+      const col = d.main ? '#dc2626' : d.service ? '#ea580c' : '#0f172a';
+      if (d.open) {
+        // ô mở thông: chỉ khoét tường, vẽ nét đứt
+        if (d.side === 'front' || d.side === 'rear') { const yy = d.side === 'front' ? Y + Ht : Y; out.push(`<line x1="${X + at}" y1="${yy}" x2="${X + at + w}" y2="${yy}" stroke="${FILL[r.type] || '#fff'}" stroke-width="5"/><line x1="${X + at}" y1="${yy}" x2="${X + at + w}" y2="${yy}" stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="3 3"/>`); }
+        else { const xx = d.side === 'left' ? X : X + Wd; const y0 = Y + Ht - at - w; out.push(`<line x1="${xx}" y1="${y0}" x2="${xx}" y2="${y0 + w}" stroke="${FILL[r.type] || '#fff'}" stroke-width="5"/><line x1="${xx}" y1="${y0}" x2="${xx}" y2="${y0 + w}" stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="3 3"/>`); }
+        return;
+      }
       if (d.side === 'front' || d.side === 'rear') {
         const yy = d.side === 'front' ? Y + Ht : Y;
         const x0 = X + at;
-        out.push(`<line x1="${x0}" y1="${yy}" x2="${x0 + w}" y2="${yy}" stroke="#fff" stroke-width="${d.main ? 7 : 4}"/>`);
+        out.push(`<line x1="${x0}" y1="${yy}" x2="${x0 + w}" y2="${yy}" stroke="#fff" stroke-width="${d.main ? 7 : 6}"/>`);
+        if (d.rolling) {
+          out.push(`<line x1="${x0}" y1="${yy}" x2="${x0 + w}" y2="${yy}" stroke="#475569" stroke-width="2" stroke-dasharray="6 4"/>`);
+          out.push(`<text x="${x0 + w / 2}" y="${yy + 14}" font-size="${fs - 3}" fill="#475569" text-anchor="middle">cửa cuốn</text>`);
+          return;
+        }
         const dir = d.side === 'front' ? -1 : 1; // mở vào trong phòng
         if (d.main && w > 1.4 * sc) {
           const hw = w / 2;
@@ -233,19 +273,31 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
         } else {
           out.push(`<path d="M ${x0} ${yy} L ${x0} ${yy + dir * w} A ${w} ${w} 0 0 ${dir > 0 ? 0 : 1} ${x0 + w} ${yy}" fill="none" stroke="${col}" stroke-width="1"/>`);
         }
-        if (d.main) out.push(`<text x="${x0 + w / 2}" y="${yy + 16}" font-size="${fs - 1}" fill="#dc2626" font-weight="900" text-anchor="middle">CỬA CHÍNH</text>`);
+        if (d.main) out.push(`<text x="${x0 + w / 2}" y="${d.side === 'front' ? yy + 16 : yy - 8}" font-size="${fs - 1}" fill="#dc2626" font-weight="900" text-anchor="middle" ${halo}>CỬA CHÍNH</text>`);
+        if (d.service) out.push(`<text x="${x0 + w / 2}" y="${d.side === 'front' ? yy + 14 : yy - 6}" font-size="${fs - 3}" fill="#ea580c" font-weight="800" text-anchor="middle" ${halo}>CỬA PHỤ</text>`);
       } else {
         const xx = d.side === 'left' ? X : X + Wd;
         const y0 = Y + Ht - at - w; // `at` tính từ phía mặt tiền của phòng
-        out.push(`<line x1="${xx}" y1="${y0}" x2="${xx}" y2="${y0 + w}" stroke="#fff" stroke-width="4"/>`);
+        out.push(`<line x1="${xx}" y1="${y0}" x2="${xx}" y2="${y0 + w}" stroke="#fff" stroke-width="6"/>`);
         const dir = d.side === 'left' ? 1 : -1;
         out.push(`<path d="M ${xx} ${y0 + w} L ${xx + dir * w} ${y0 + w} A ${w} ${w} 0 0 ${dir > 0 ? 0 : 1} ${xx} ${y0}" fill="none" stroke="${col}" stroke-width="1"/>`);
+        if (d.main || d.service) out.push(`<text x="${xx - dir * 6}" y="${y0 + w / 2}" font-size="${fs - 3}" fill="${col}" font-weight="900" text-anchor="middle" transform="rotate(-90 ${xx - dir * 6} ${y0 + w / 2})" ${halo}>${d.main ? 'CỬA CHÍNH' : 'CỬA PHỤ'}</text>`);
       }
     });
   };
   inside.forEach(doorDraw);
 
-  const halo = 'stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round"';
+  /* ── Lối đi (lối vào khách, lối ra bếp phụ) ── */
+  (plan.paths || []).forEach((p, i) => {
+    if (p.pts.length < 2) return;
+    const d = p.pts.map((q, k) => `${k ? 'L' : 'M'} ${px(q[0])} ${py(q[1])}`).join(' ');
+    const mid = `pm_${plan.floor}_${i}`;
+    out.push(`<defs><marker id="${mid}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${p.color}"/></marker></defs>`);
+    out.push(`<path d="${d}" fill="none" stroke="${p.color}" stroke-width="2.2" stroke-dasharray="7 5" stroke-linecap="round" marker-end="url(#${mid})" opacity="0.9"/>`);
+    const q = p.pts[Math.max(0, Math.floor((p.pts.length - 1) / 2))], q2 = p.pts[Math.max(1, Math.floor((p.pts.length - 1) / 2) + 1)];
+    out.push(`<text x="${(px(q[0]) + px(q2[0])) / 2 + 8}" y="${(py(q[1]) + py(q2[1])) / 2 - 6}" font-size="${fs - 2}" font-weight="800" fill="${p.color}" text-anchor="start" ${halo}>${esc(p.label)}</text>`);
+  });
+
   /* ── Lưới 9 cung ── */
   if (showGrid) {
     for (let i = 1; i < 3; i++) {
@@ -256,6 +308,11 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
       const x = px((W / 3) * c.col) + 3, y = py((H / 3) * (c.row + 1)) + 10;
       const color = c.good === true ? '#15803d' : c.good === false ? '#dc2626' : '#7c3aed';
       const gfs = Math.max(7.5, Math.min(10, (W / 3) * sc / 9));
+      if (free) {
+        // nhà vườn: phòng thấp → ghi 1 dòng nhỏ, mờ ở góc ô để không đè tên phòng
+        out.push(`<text x="${x}" y="${y - 1}" font-size="${Math.min(8.5, gfs)}" font-weight="700" fill="${color}" opacity="0.85" ${halo}>${esc(c.direction)}${c.star && c.direction !== 'Trung cung' ? ' · ' + esc(c.star) : ''}</text>`);
+        return;
+      }
       out.push(`<text x="${x}" y="${y}" font-size="${gfs}" font-weight="800" fill="${color}" ${halo}>${esc(c.direction)}</text>`);
       if (c.star && c.direction !== 'Trung cung') out.push(`<text x="${x}" y="${y + gfs + 1}" font-size="${gfs - 0.5}" font-weight="600" fill="${color}" ${halo}>${esc(c.star)}</text>`);
     });
@@ -289,7 +346,21 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   });
   outsideRooms.forEach(r => {
     const { X, Y, Wd, Ht } = rx(r);
-    if (Ht < 14) return;
+    if (Ht < 14 || !r.name) return;
+    if (free) {
+      if (r.type === 'walkway') return;
+      const big = r.type === 'outkitchen';
+      const size = fs - (big ? 2 : 3);
+      const est = (t: string) => t.length * size * 0.55;
+      const small = Math.max(Wd, Ht) < est(r.name) * 0.6;       // ô quá nhỏ (giếng) → ghi chữ dưới ô
+      const vertical = !small && Wd < 50 && Ht > Wd * 1.6;
+      const lines = !small && !vertical && est(r.name) > Wd - 6 && r.name.includes(' (') ? [r.name.split(' (')[0], '(' + r.name.split(' (').slice(1).join(' (')] : [r.name];
+      const cx = X + Wd / 2, cy = small ? Y + Ht + size + 2 : Y + Ht / 2 + 4 - (lines.length - 1) * (size / 2);
+      const tr = vertical ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
+      lines.forEach((l, k) => out.push(`<text x="${cx}" y="${cy + k * (size + 1)}" font-size="${size}" fill="${big ? '#9a3412' : '#475569'}" font-weight="${big ? 800 : 600}" text-anchor="middle" font-style="italic" ${halo}${tr}>${esc(l)}</text>`));
+      if (big) out.push(`<text x="${cx}" y="${cy + lines.length * (size + 1)}" font-size="${size - 2}" fill="#9a3412" text-anchor="middle" ${halo}>${f1(r.w)}×${f1(r.h)}m</text>`);
+      return;
+    }
     out.push(`<text x="${X + Wd / 2}" y="${Y + Ht / 2 + 4}" font-size="${fs - 2}" fill="#64748b" text-anchor="middle" font-style="italic">${esc(r.name)} (${f1(r.h)}m)</text>`);
   });
 
@@ -304,7 +375,16 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     out.push(`<line x1="${x - 5}" y1="${y1}" x2="${x + 5}" y2="${y1}" stroke="#334155"/><line x1="${x - 5}" y1="${y2}" x2="${x + 5}" y2="${y2}" stroke="#334155"/>`);
     if (Math.abs(y2 - y1) > 16) out.push(`<text x="${x + 4}" y="${(y1 + y2) / 2}" font-size="${fs - 3}" fill="#0f172a" transform="rotate(90 ${x + 4} ${(y1 + y2) / 2})" text-anchor="middle">${label}</text>`);
   };
-  const bottom = py(-FS);
+  const bottom = py(LOT.y);
+  if (free) {
+    // chuỗi kích thước theo cột (ngang) & hàng (sâu) của lưới phác thảo
+    const xs = [...new Set(inside.flatMap(r => [Math.round(r.x * 10) / 10, Math.round((r.x + r.w) * 10) / 10]))].sort((a, b) => a - b);
+    for (let i = 0; i < xs.length - 1; i++) if (xs[i + 1] - xs[i] >= 0.6) dimH(px(xs[i]), px(xs[i + 1]), bottom + 12, `${f1(xs[i + 1] - xs[i])}`);
+    dimH(px(0), px(W), bottom + 26, `Nhà ${f2(W)} m`);
+    const ys2 = [...new Set(inside.flatMap(r => [Math.round(r.y * 10) / 10, Math.round((r.y + r.h) * 10) / 10]))].sort((a, b) => a - b);
+    for (let i = 0; i < ys2.length - 1; i++) if (ys2[i + 1] - ys2[i] >= 0.6) dimV(py(ys2[i + 1]), py(ys2[i]), px(LOT.x) - 22, `${f2(ys2[i + 1] - ys2[i])}`);
+    dimV(py(H), py(0), px(LOT.x) - 48, `Nhà ${f2(H)} m`);
+  } else {
   dimH(px(0), px(W), bottom + 22, `${f2(W)} m`);
   // chuỗi chiều sâu bên trái: sân sau | các dải | sân trước
   const ys = new Set<number>([-FS, 0, H, H + BS]);
@@ -316,19 +396,33 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     dimV(py(b), py(a), px(0) - 22, `${f2(b - a)}`);
   }
   dimV(py(H + BS), py(-FS), px(0) - 48, `${f2(L)} m`);
+  }
 
   /* ── Đường / mặt tiền ── */
-  out.push(`<rect x="${px(0) - 20}" y="${bottom + 34}" width="${dW + 40}" height="26" fill="#e2e8f0"/>`);
-  out.push(`<text x="${px(W / 2)}" y="${bottom + 52}" font-size="12" font-weight="800" fill="#334155" text-anchor="middle">ĐƯỜNG / LỐI VÀO — MẶT TIỀN HƯỚNG ${esc(plan.facing.toUpperCase())}</text>`);
+  const roadSide = plan.road?.side || 'front';
+  if (!free || roadSide === 'front') {
+    out.push(`<rect x="${px(LOT.x) - 20}" y="${bottom + 34}" width="${dW + 40}" height="26" fill="#e2e8f0"/>`);
+    out.push(`<text x="${px(LOT.x + LOT.w / 2)}" y="${bottom + 52}" font-size="12" font-weight="800" fill="#334155" text-anchor="middle">ĐƯỜNG / LỐI VÀO — MẶT TIỀN HƯỚNG ${esc(plan.facing.toUpperCase())}</text>`);
+  } else {
+    const top = py(LOT.y + LOT.h);
+    if (roadSide === 'left' || roadSide === 'right') {
+      const xr = roadSide === 'left' ? px(LOT.x) - 70 : px(LOT.x + LOT.w) + 4;
+      out.push(`<rect x="${xr}" y="${top}" width="16" height="${dH}" fill="#e2e8f0"/>`);
+      out.push(`<text x="${xr + 12}" y="${top + dH / 2}" font-size="11" font-weight="800" fill="#334155" text-anchor="middle" transform="rotate(-90 ${xr + 12} ${top + dH / 2})">${esc(plan.road?.label || 'ĐƯỜNG VÀO')}</text>`);
+    } else {
+      out.push(`<rect x="${px(LOT.x)}" y="${top - 22}" width="${dW}" height="18" fill="#e2e8f0"/><text x="${px(LOT.x + LOT.w / 2)}" y="${top - 9}" font-size="11" font-weight="800" fill="#334155" text-anchor="middle">${esc(plan.road?.label || 'ĐƯỜNG VÀO')}</text>`);
+    }
+    out.push(`<text x="${px(W / 2)}" y="${bottom + 50}" font-size="12" font-weight="800" fill="#334155" text-anchor="middle">MẶT TIỀN (CỬA CHÍNH) HƯỚNG ${esc(plan.facing.toUpperCase())}</text>`);
+  }
 
   /* ── Mũi tên Bắc ── */
-  const nx = px(W) + 50 > panelX - 40 ? drawL + drawMaxW - 30 : px(W) + 50, ny = drawT + 40;
+  const nx = px(LOT.x + LOT.w) + 50 > panelX - 40 ? drawL + drawMaxW - 30 : px(LOT.x + LOT.w) + 50, ny = drawT + 40;
   out.push(`<g transform="translate(${nx} ${ny}) rotate(${plan.northPageDeg})"><circle r="24" fill="#fff" stroke="#0f172a" stroke-width="1.2"/><path d="M 0 -20 L 7 8 L 0 3 L -7 8 Z" fill="#dc2626"/><text y="-26" font-size="12" font-weight="900" text-anchor="middle" fill="#0f172a">B</text></g>`);
 
   /* ── Bảng bên phải ── */
   let y = drawT;
   const P: string[] = [];
-  const head = (t: string) => { P.push(`<rect x="${panelX}" y="${y}" width="${panelW}" height="24" fill="#0f172a"/><text x="${panelX + 10}" y="${y + 16}" font-size="12" font-weight="800" fill="#fbbf24">${esc(t)}</text>`); y += 32; };
+  const head = (t: string) => { P.push(`<rect x="${panelX}" y="${y}" width="${panelW}" height="24" fill="#0f172a"/><text x="${panelX + 10}" y="${y + 16}" font-size="12" font-weight="800" fill="#fbbf24">${esc(t)}</text>`); y += 40; };
   const line = (t: string, color = '#0f172a', bold = false, max = 58) => {
     wrap(t, max).forEach(l => { P.push(`<text x="${panelX + 10}" y="${y}" font-size="11" fill="${color}" ${bold ? 'font-weight="700"' : ''}>${esc(l)}</text>`); y += 15; });
   };
@@ -345,6 +439,11 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     y += 15;
   });
   y += 8;
+  if (plan.sketchNotes && plan.sketchNotes.length) {
+    head('THEO PHÁC THẢO CỦA GIA CHỦ');
+    plan.sketchNotes.forEach(n => { line(n, n.startsWith('↺') ? '#b45309' : n.startsWith('?') ? '#7c3aed' : '#15803d'); y += 2; });
+    y += 6;
+  }
   head('PHONG THỦY BỐ TRÍ');
   plan.fengShuiNotes.forEach(n => { line('• ' + n); y += 2; });
   y += 6;
@@ -354,6 +453,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   head('CHÚ THÍCH');
   line('● xanh: cung tốt · ● đỏ: cung xấu · đường tím: lưới 9 cung', '#334155');
   line('Mũi tên đỏ tại bếp: hướng miệng bếp. Mũi tên vàng: hướng bàn thờ.', '#334155');
+  if (free) line('Nét đứt xanh: lối vào của khách · nét đứt cam: lối ra bếp phụ · nét đứt xám: ô mở thông giữa các không gian chung.', '#334155');
   line('Bản vẽ sơ bộ phục vụ tư vấn. Cần KTS/KS lập hồ sơ thiết kế kỹ thuật, khảo sát hiện trạng trước khi thi công & xin phép xây dựng.', '#64748b');
 
   const contentBottom = Math.max(bottom + 70, y + 10);
