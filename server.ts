@@ -2376,10 +2376,10 @@ function fallbackExtractFromDescription(desc: string) {
   const matchTang = desc.match(/(\d+)\s*(tầng|lầu)/i);
   if (matchTang) so_tang = parseInt(matchTang[1]) || 2;
 
-  let dien_tich = "5x20m";
-  const matchDim = desc.match(/(\d+)\s*[xX×]\s*(\d+)/);
+  let dien_tich = ""; // không tự bịa kích thước khi khách chưa nhập
+  const matchDim = desc.match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)/);
   if (matchDim) {
-    dien_tich = `${matchDim[1]}x${matchDim[2]}m`;
+    dien_tich = `${matchDim[1].replace(',', '.')}x${matchDim[2].replace(',', '.')}`;
   }
 
   let loai_ct = "Nhà phố";
@@ -2396,16 +2396,22 @@ function fallbackExtractFromDescription(desc: string) {
     so_tang,
     ngan_sach: "",
     menh: "",
-    huong_muon: "",
+    huong_muon: (() => { const m = desc.match(/hướng\s+(đông nam|đông bắc|tây nam|tây bắc|đông|tây|nam|bắc)/i); return m ? m[1].replace(/(^|\s)\S/g, (c: string) => c.toUpperCase()) : ""; })(),
+    so_phong_ngu: (() => { const m = desc.match(/(\d+)\s*(phòng ngủ|pn\b)/i); return m ? parseInt(m[1]) : 0; })(),
+    so_wc: (() => { const m = desc.match(/(\d+)\s*(wc|vệ sinh|toilet)/i); return m ? parseInt(m[1]) : 0; })(),
+    phong_tho: lower.includes("phòng thờ") || lower.includes("thờ"),
+    gara: lower.includes("gara") || lower.includes("ô tô") ? "oto" : "xe_may",
+    loai_dat: lower.includes("đất yếu") || lower.includes("ao") && lower.includes("lấp") ? "yeu" : lower.includes("đất cát") ? "cat" : "chua_biet",
+    kich_thuoc_dat: matchDim ? { rong_truoc: parseFloat(matchDim[1].replace(',', '.')), rong_sau: parseFloat(matchDim[1].replace(',', '.')), dai: parseFloat(matchDim[2].replace(',', '.')), hinh_dang: "chu_nhat" } : undefined,
     loai_ket_cau_chinh: lower.includes("eps") || lower.includes("bê tông nhẹ") || lower.includes("gông 3d") ? "Bê tông nhẹ EPS đúc liền khối & Gông 3D" : "Bê tông cốt thép truyền thống",
     so_mat_tien: lower.includes("2 mặt tiền") || lower.includes("hai mặt tiền") ? 2 : 1,
     thep_hop_cot: "",
-    loai_mai: "Tôn lạnh",
+    loai_mai: lower.includes("thái") ? "Mái Thái/Nhật BTCT dán ngói" : lower.includes("ngói") ? "Mái ngói kèo thép" : lower.includes("tôn") ? "Mái tôn" : "",
     loai_san: "Cemboard",
     loai_vach: "Panel EPS",
     loai_tran: "Thạch cao",
     phong_cach: "Hiện đại",
-    canh_bao: ["Trích xuất thông minh tự động (AI heuristic) do hệ thống Gemini đang bận hoặc quá tải tạm thời."]
+    canh_bao: ["AI đọc ảnh đang bận — mới đọc được phần chữ mô tả, CHƯA đọc ảnh sổ đỏ/phác thảo. Vui lòng kiểm tra lại kích thước, số tầng.", ...(dien_tich ? [] : ["Chưa có kích thước đất — vui lòng nhập dạng rộng x dài, ví dụ 5x20."])]
   };
 }
 
@@ -2448,10 +2454,57 @@ Trích xuất thông tin công trình thành một đối tượng JSON THUẦN 
   "loai_vach": "Loại vách (Panel EPS / Panel PU / Khác)",
   "loai_tran": "Loại trần (Nhựa Nano / Thạch cao / Khác)",
   "phong_cach": "Phong cách kiến trúc (Hiện đại, Tân cổ điển, Tối giản, ...)",
+  "kich_thuoc_dat": { "rong_truoc": 5.0, "rong_sau": 5.0, "dai": 20.0, "hinh_dang": "chu_nhat | no_hau | top_hau | meo" },
+  "khoang_lui_truoc": null,
+  "khoang_lui_sau": null,
+  "loai_dat": "tot | yeu | cat | chua_biet",
+  "so_phong_ngu": 0,
+  "so_wc": 0,
+  "phong_tho": false,
+  "gara": "oto | xe_may | khong",
+  "bo_tri_phac_thao": {
+    "co_phac_thao": false,
+    "kieu": "nha_ong | tu_do",
+    "huong_mat_tien": "hướng cửa chính ghi trên bản vẽ (vd: Nam) hoặc rỗng",
+    "vi_tri_thang": "trai | phai | giua | khong_ro",
+    "nha": { "rong": null, "sau": null },
+    "luoi": { "so_hang": 3, "so_cot": 4 },
+    "tang": [
+      { "tang": 1, "phong": [ {
+        "loai": "khach | an | bep | ngu | wc | tho | doc_sach | lam_viec | sinh_hoat | kho | sanh | hanh_lang | hien | gara | thang | gieng_troi | san",
+        "ten_goc": "chữ đúng như ghi trên bản vẽ, vd 'P. Thờ gia tiên'",
+        "dien_tich": null,
+        "hang": 0, "cot": 0, "so_hang": 1, "so_cot": 1,
+        "vi_tri": "truoc | giua | sau", "ben": "trai | phai | ca_ngang",
+        "ghi_chu": "chi tiết vẽ trong phòng: cột, tủ, cửa kính...",
+        "tin_cay": 0.9
+      } ] }
+    ],
+    "cua": [ { "loai": "chinh | phu", "phong": "ten_goc của phòng có cửa", "canh": "truoc | sau | trai | phai", "ra": "hien | duong | vuon | bep_phu | san" } ],
+    "hien": { "co": false, "canh": "truoc", "sau": null, "tu_cot": 0, "den_cot": 0 },
+    "loi_vao": { "canh": "truoc | trai | phai | sau", "tu": "truoc | giua | sau", "ghi_chu": "" },
+    "ngoai_nha": [ { "loai": "bep_phu | gieng | ao | vuon | cay_xanh | san | chuong_trai", "canh": "truoc | sau | trai | phai", "ghi_chu": "" } ],
+    "doc_khong_ro": ["chữ hoặc nét không đọc được"]
+  },
+  "do_tin_cay": { "dien_tich": 0.0, "so_tang": 0.0, "huong_muon": 0.0, "kich_thuoc_dat": 0.0, "bo_tri_phac_thao": 0.0 },
   "canh_bao": ["Danh sách các trường dữ liệu AI không đọc rõ hoặc không chắc chắn, ví dụ: 'Không đọc rõ diện tích trên sổ đỏ', 'Không xác định được số mặt tiền'..."]
 }
 
 QUY TẮC ƯU TIÊN:
+0. "trai/phai" tính theo người ĐỨNG NGOÀI ĐƯỜNG NHÌN VÀO MẶT TIỀN. "truoc" = phía mặt đường, "sau" = phía cuối đất.
+0b. Sổ đỏ: đọc kích thước từng cạnh trên sơ đồ thửa đất → "kich_thuoc_dat" (cạnh giáp đường = rong_truoc, cạnh cuối = rong_sau). Rộng sau > rộng trước = "no_hau"; nhỏ hơn = "top_hau".
+0c. Bản vẽ tay / phác thảo → "bo_tri_phac_thao" (co_phac_thao = true). Không có phác thảo thì để mảng "tang" rỗng. Đọc theo các bước:
+   (1) TÌM CỬA CHÍNH trước (chữ "Cửa chính", "CC", mũi tên vào nhà, chữ hướng "H Nam", "Hướng Đông"...). Phía có cửa chính = "truoc". Ghi hướng vào "huong_mat_tien".
+   (2) XOAY NHẬN THỨC cho đúng: dù trên giấy cửa chính nằm ở cạnh dưới, cạnh trên hay cạnh hông, luôn quy về người ĐỨNG NGOÀI NHÌN VÀO CỬA CHÍNH. Hàng 0 = sát cửa chính, hàng tăng dần vào trong. Cột 0 = bên TRÁI của người đó. (Cửa chính ở cạnh dưới tờ giấy → trái giấy = trái. Cửa chính ở cạnh trên → phải giấy = trái.)
+   (3) CHIA LƯỚI theo các NÉT LIỀN chia phòng (tường). Mỗi phòng ghi "hang","cot" (ô góc trước-trái của phòng), "so_hang","so_cot" (số ô chiếm). Phòng lớn chiếm nhiều ô. "luoi" = tổng số hàng/cột. Ô không có chữ = để trống (tool tự làm sảnh / lối đi).
+   (4) "kieu" = "tu_do" khi nhà ngang rộng, nhà vườn, nhà cấp 4, bố cục không phải nhà ống; "nha_ong" khi nhà hẹp sâu chia dải trước–sau.
+   (5) CHỮ VIẾT TẮT / VIẾT NGOÁY hay gặp: "P." = phòng; "PK", "P.K", "Khách" = khach; "PN", "P.N", "Ngủ" = ngu; "WC", "VS", "Vệ sinh", "Tắm" = wc; "B", "Bếp" = bep; "Thờ", "PT", "Gia tiên" = tho; "Đọc sách", "Thư viện", "ĐS" = doc_sach; "LV" = lam_viec; "SH" = sinh_hoat; "Bàn ăn", "Ăn" = an; "Hiên", "Mái hiên" = hien; "Tủ giày", "Áo mũ" = sanh (sảnh vào nhà); "Bếp củi", "Bếp phụ", "Bếp đun" ngoài nhà = ngoai_nha bep_phu; "Giếng" = gieng; "Ao", "Hồ" = ao; "Cây xanh", "Vườn" = vuon/cay_xanh; "Đường vào", "Lối vào" = loi_vao.
+   (6) SỐ: "25m2", "25m²", "25 m" cạnh tên phòng = "dien_tich" (m²). Số có "m" ghi dọc cạnh nhà (vd "10m") = kích thước nhà → "nha.sau" (cạnh vuông góc mặt tiền) hoặc "nha.rong" (cạnh song song mặt tiền). Nhà xây theo khổ đất ghi trên bản vẽ; đất thừa là sân vườn.
+   (7) NÉT VẼ: nét liền = tường; nét đứt = mái hiên / ranh / khu không tường; vòng tròn nhỏ = cột (ghi vào "ghi_chu"); hình chữ nhật nhỏ trong phòng = đồ nội thất (tủ, giường, bàn) — KHÔNG phải phòng; hình bầu dục giữa nhà có chữ "Bàn ăn" = phòng ăn mở (loai "an"); mũi tên = cửa / lối đi.
+   (8) CỬA: "cua" ghi cửa chính và mọi cửa phụ đi ra ngoài (ra vườn, ra bếp phụ, ra giếng). Cửa phụ trong nhà đi thẳng ra bếp phụ / vườn: "loai" = "phu", "ra" = "bep_phu" hoặc "vuon". Người nhà đi từ trong nhà ra thẳng cửa phụ, không đi vòng ngoài.
+   (9) "loi_vao": khách từ đường đi vào phía nào ("canh") và bắt đầu từ đoạn nào ("tu"). "ngoai_nha": công trình / khu ngoài nhà và phía của nó (ở Việt Nam đất rộng hay có bếp phụ đun củi, giếng, ao, vườn).
+   (10) Chữ nào không đọc được: đoán gần nhất, "tin_cay" < 0.6 và ghi nguyên văn nét đó vào "doc_khong_ro". TUYỆT ĐỐI không thêm phòng không có trên bản vẽ.
+0d. "do_tin_cay": 0–1 cho mức chắc chắn của từng trường (chữ mờ, nét vẽ không rõ → dưới 0.6). Trường nào dưới 0.7 phải ghi lý do vào "canh_bao".
 1. Sổ đỏ ưu tiên lấy diện tích, kích thước, địa chỉ, hướng đất.
 2. Ảnh bản vẽ ưu tiên lấy số tầng, công năng.
 3. Text mô tả dùng bổ sung loại kết cấu chính, vật liệu, phong cách.
@@ -2465,7 +2518,7 @@ Nếu trường nào không tìm thấy thông tin, để trống ("") hoặc gi
         const response = await ai.models.generateContent({
           model: model,
           contents: { parts },
-          config: { temperature: 0.2, maxOutputTokens: 2048 }
+          config: { temperature: 0.2, maxOutputTokens: 8192 }
         });
         return response.text;
       });
