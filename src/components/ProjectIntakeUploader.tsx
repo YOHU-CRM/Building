@@ -282,6 +282,107 @@ export const ProjectIntakeUploader: React.FC<ProjectIntakeUploaderProps> = ({
             </div>
           </div>
 
+          {/* PHIẾU YÊU CẦU BỔ SUNG: đất, nền, phòng, phác thảo — khách xác nhận trước khi vẽ & tính giá */}
+          {(() => {
+            const conf = extractedData.do_tin_cay || {};
+            const low = (k: string) => typeof conf[k] === 'number' && conf[k] < 0.7;
+            const inCls = (k?: string) => `w-full p-3 rounded-lg border text-sm font-bold ${k && low(k) ? 'border-amber-500 ring-1 ring-amber-500/40' : ''} ${theme === 'dark' ? 'bg-[#0c101d] border-slate-700 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`;
+            const kd = extractedData.kich_thuoc_dat || {};
+            const setKd = (f: string, v: any) => handleChangeField('kich_thuoc_dat', { ...kd, [f]: v });
+            const sk = extractedData.bo_tri_phac_thao || {};
+            const LOAI: Record<string, string> = { khach: 'Phòng khách', an: 'Phòng ăn', bep: 'Bếp', ngu: 'P. ngủ', wc: 'WC', tho: 'Phòng thờ', gara: 'Gara', sinh_hoat: 'Sinh hoạt chung', gieng_troi: 'Giếng trời', san: 'Sân', kho: 'Kho', lam_viec: 'Làm việc', doc_sach: 'Đọc sách', sanh: 'Sảnh', hanh_lang: 'Hành lang', hien: 'Hiên', thang: 'Cầu thang' };
+            const VT: Record<string, string> = { truoc: 'trước', giua: 'giữa', sau: 'sau' };
+            const BEN: Record<string, string> = { trai: 'trái', phai: 'phải', ca_ngang: 'cả ngang' };
+            const hasSketch = Array.isArray(sk.tang) && sk.tang.some((t: any) => (t.phong || []).length);
+            const shapeNote = kd.hinh_dang === 'no_hau' ? 'Đất nở hậu' : kd.hinh_dang === 'top_hau' ? 'Đất tóp hậu' : kd.hinh_dang === 'meo' ? 'Đất méo' : '';
+            return (
+              <div className={`p-3.5 rounded-xl border space-y-3 text-xs sm:text-sm ${theme === 'dark' ? 'border-slate-700 bg-[#0c101d]/60' : 'border-slate-200 bg-white'}`}>
+                <div className="font-black text-amber-500">📋 Phiếu yêu cầu thiết kế — ô viền vàng là chỗ AI chưa chắc, anh/chị kiểm tra giúp</div>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div><label className="block font-bold text-slate-400 mb-1">Rộng mặt tiền (m)</label>
+                    <input className={inCls('kich_thuoc_dat')} inputMode="decimal" value={kd.rong_truoc ?? ''} onChange={e => setKd('rong_truoc', e.target.value)} /></div>
+                  <div><label className="block font-bold text-slate-400 mb-1">Rộng cuối đất (m)</label>
+                    <input className={inCls('kich_thuoc_dat')} inputMode="decimal" value={kd.rong_sau ?? ''} onChange={e => setKd('rong_sau', e.target.value)} /></div>
+                  <div><label className="block font-bold text-slate-400 mb-1">Chiều dài đất (m)</label>
+                    <input className={inCls('kich_thuoc_dat')} inputMode="decimal" value={kd.dai ?? ''} onChange={e => setKd('dai', e.target.value)} /></div>
+                </div>
+                {shapeNote && <div className="text-amber-500">⚠️ {shapeNote}: bản vẽ & dự toán dùng bề rộng trung bình. Kiến trúc sư sẽ xử lý phần đất lệch khi thiết kế chi tiết.</div>}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div><label className="block font-bold text-slate-400 mb-1">Loại đất</label>
+                    <select className={inCls()} value={extractedData.loai_dat || 'chua_biet'} onChange={e => handleChangeField('loai_dat', e.target.value)}>
+                      <option value="chua_biet">Chưa biết</option><option value="tot">Đất tốt</option><option value="yeu">Đất yếu / ao lấp</option><option value="cat">Đất cát</option>
+                    </select></div>
+                  <div><label className="block font-bold text-slate-400 mb-1">Số phòng ngủ</label>
+                    <input type="number" min={0} className={inCls()} value={extractedData.so_phong_ngu || ''} onChange={e => handleChangeField('so_phong_ngu', Number(e.target.value))} /></div>
+                  <div><label className="block font-bold text-slate-400 mb-1">Số WC</label>
+                    <input type="number" min={0} className={inCls()} value={extractedData.so_wc || ''} onChange={e => handleChangeField('so_wc', Number(e.target.value))} /></div>
+                  <div><label className="block font-bold text-slate-400 mb-1">Gara</label>
+                    <select className={inCls()} value={extractedData.gara || 'xe_may'} onChange={e => handleChangeField('gara', e.target.value)}>
+                      <option value="xe_may">Để xe máy</option><option value="oto">Gara ô tô</option><option value="khong">Không</option>
+                    </select></div>
+                </div>
+                <label className="flex items-center gap-2 font-bold"><input type="checkbox" checked={!!extractedData.phong_tho} onChange={e => handleChangeField('phong_tho', e.target.checked)} /> Có phòng thờ</label>
+                {hasSketch && (
+                  <div className={`rounded-lg p-3 border ${low('bo_tri_phac_thao') ? 'border-amber-500' : theme === 'dark' ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <div className="font-black mb-1.5">✏️ AI đọc được từ bản vẽ tay{sk.vi_tri_thang && sk.vi_tri_thang !== 'khong_ro' ? ` · cầu thang bên ${BEN[sk.vi_tri_thang] || sk.vi_tri_thang}` : ''}:</div>
+                    {sk.tang.map((t: any, i: number) => {
+                      const ph = (t.phong || []).filter((r: any) => Number.isFinite(Number(r.hang)) && Number.isFinite(Number(r.cot)));
+                      if (ph.length < 2) return (
+                        <div key={i} className="mb-1"><b>Tầng {t.tang}:</b> {(t.phong || []).map((r: any) => `${r.ten_goc || LOAI[r.loai] || r.loai}${r.vi_tri ? ' (' + (VT[r.vi_tri] || r.vi_tri) + (r.ben && r.ben !== 'ca_ngang' ? ', ' + (BEN[r.ben] || r.ben) : '') + ')' : ''}`).join(' · ') || '—'}</div>
+                      );
+                      // Sơ đồ ô: hàng 0 (sát cửa chính) vẽ ở DƯỚI, giống bản vẽ khi đứng ngoài nhìn vào cửa chính
+                      const R = Math.max(Number(sk.luoi?.so_hang) || 0, ...ph.map((r: any) => Number(r.hang) + (Number(r.so_hang) || 1)));
+                      const C = Math.max(Number(sk.luoi?.so_cot) || 0, ...ph.map((r: any) => Number(r.cot) + (Number(r.so_cot) || 1)));
+                      return (
+                        <div key={i} className="mb-2">
+                          <b>Tầng {t.tang}</b> — sơ đồ phòng AI đọc được (phía dưới = cửa chính{sk.huong_mat_tien ? `, hướng ${sk.huong_mat_tien}` : ''}):
+                          <div className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${C}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${R}, minmax(44px, auto))` }}>
+                            {ph.map((r: any, k: number) => {
+                              const rs = Number(r.so_hang) || 1, cs = Number(r.so_cot) || 1;
+                              const unsure = typeof r.tin_cay === 'number' && r.tin_cay < 0.6;
+                              return (
+                                <div key={k} className={`rounded-md border p-1 text-[10px] sm:text-xs leading-tight ${unsure ? 'border-amber-500 bg-amber-500/10' : r.loai === 'hien' ? 'border-dashed border-slate-400' : theme === 'dark' ? 'border-slate-600 bg-slate-800/60' : 'border-slate-300 bg-slate-50'}`}
+                                  style={{ gridColumn: `${Number(r.cot) + 1} / span ${cs}`, gridRow: `${R - Number(r.hang) - rs + 1} / span ${rs}` }}>
+                                  <div className="font-black">{r.ten_goc || LOAI[r.loai] || r.loai}{unsure ? ' (?)' : ''}</div>
+                                  {r.dien_tich ? <div className="opacity-70">{r.dien_tich} m²</div> : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(sk.nha?.rong || sk.nha?.sau || sk.kieu === 'tu_do') && (
+                      <div className="grid grid-cols-2 gap-2.5 mt-2">
+                        <div><label className="block font-bold text-slate-400 mb-1">Chiều ngang nhà (m) — để trống: tool tự tính</label>
+                          <input className={inCls('bo_tri_phac_thao')} inputMode="decimal" value={sk.nha?.rong ?? ''} onChange={e => handleChangeField('bo_tri_phac_thao', { ...sk, nha: { ...(sk.nha || {}), rong: e.target.value } })} /></div>
+                        <div><label className="block font-bold text-slate-400 mb-1">Chiều sâu nhà (m)</label>
+                          <input className={inCls('bo_tri_phac_thao')} inputMode="decimal" value={sk.nha?.sau ?? ''} onChange={e => handleChangeField('bo_tri_phac_thao', { ...sk, nha: { ...(sk.nha || {}), sau: e.target.value } })} /></div>
+                      </div>
+                    )}
+                    {(() => {
+                      const NN: Record<string, string> = { bep_phu: 'Bếp phụ (đun củi)', gieng: 'Giếng', ao: 'Ao', vuon: 'Vườn', cay_xanh: 'Cây xanh', san: 'Sân', chuong_trai: 'Chuồng trại' };
+                      const CANH: Record<string, string> = { truoc: 'trước', sau: 'sau', trai: 'trái', phai: 'phải' };
+                      const out: string[] = [];
+                      (sk.cua || []).forEach((c: any) => out.push(`${c.loai === 'chinh' ? 'Cửa chính' : 'Cửa phụ'}${c.phong ? ' ở ' + c.phong : ''}${c.canh ? ', phía ' + (CANH[c.canh] || c.canh) : ''}${c.ra === 'bep_phu' ? ' → ra bếp phụ' : c.ra === 'vuon' ? ' → ra vườn' : ''}`));
+                      if (sk.hien?.co) out.push(`Hiên trước nhà${sk.hien.sau ? ' sâu ' + sk.hien.sau + 'm' : ''}`);
+                      if (sk.loi_vao?.canh) out.push(`Khách vào từ phía ${CANH[sk.loi_vao.canh] || sk.loi_vao.canh}`);
+                      (sk.ngoai_nha || []).forEach((o: any) => out.push(`${NN[o.loai] || o.loai}${o.canh ? ' phía ' + (CANH[o.canh] || o.canh) : ''}`));
+                      return out.length ? <div className="mt-2"><b>Cửa · lối đi · ngoài nhà:</b> {out.join(' · ')}</div> : null;
+                    })()}
+                    {Array.isArray(sk.doc_khong_ro) && sk.doc_khong_ro.length > 0 && (
+                      <div className="mt-2 text-amber-500">⚠️ AI chưa đọc rõ: {sk.doc_khong_ro.join(' · ')} — anh/chị kiểm tra giúp.</div>
+                    )}
+                    <label className="flex items-center gap-2 mt-2 font-bold">
+                      <input type="checkbox" checked={sk.co_phac_thao !== false} onChange={e => handleChangeField('bo_tri_phac_thao', { ...sk, co_phac_thao: e.target.checked })} />
+                      Vẽ mặt bằng theo bố trí này (chỗ nào phạm lỗi kỹ thuật/phong thủy, bản vẽ tự điều chỉnh và ghi rõ lý do)
+                    </label>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="flex justify-end gap-2 pt-3">
             <button
               type="button"

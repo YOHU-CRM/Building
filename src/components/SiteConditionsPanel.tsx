@@ -1,6 +1,6 @@
 import React from 'react';
 import { PROVINCE_NAMES_2025, resolveLocation } from '../lib/vnProvinces';
-import { computeSite } from '../lib/siteGeometry';
+import { computeSiteFor } from '../lib/siteGeometry';
 import { decideFoundation, normalizeRoof } from '../lib/boqEngine';
 import { resolveOptionKey } from '../lib/unifiedPricing';
 
@@ -19,7 +19,7 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
   const dark = theme === 'dark';
   const ct = constructionInfo || {};
   const set = (patch: any) => setConstructionInfo({ ...ct, ...patch });
-  const site = computeSite(ct.dimensions, ct.frontSetbackM, ct.backSetbackM);
+  const site = computeSiteFor(ct);
   const floors = Math.max(1, Number(ct.floors) || 1);
   const nm = decideFoundation(resolveOptionKey(ct.loai_ket_cau_chinh), ct.soilType, floors, site.footprint, site.lotWidthM, site.houseLengthM);
   const roof = normalizeRoof(ct.loai_mai || ct.constructionType, floors);

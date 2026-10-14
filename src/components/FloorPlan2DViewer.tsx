@@ -75,12 +75,14 @@ export default function FloorPlan2DViewer({
     const mm = (m: number) => Math.round(m * 1000);
     const oy = plan.frontSetbackM; // đưa sân trước về y = 0
     const model: makerjs.IModel = { models: {}, paths: {} };
-    const layerOf: Record<string, string> = { wc: 'WC', stair: 'CAU_THANG', lightwell: 'GIENG_TROI', corridor: 'HANH_LANG', yard: 'SAN', balcony: 'SAN', terrace: 'SAN' };
+    const layerOf: Record<string, string> = { wc: 'WC', stair: 'CAU_THANG', lightwell: 'GIENG_TROI', corridor: 'HANH_LANG', yard: 'SAN', balcony: 'SAN', terrace: 'SAN', porch: 'SAN', walkway: 'SAN', garden: 'SAN', pond: 'SAN', well: 'SAN', outkitchen: 'BEP_PHU' };
 
     // Ranh đất & tường bao
-    const lot = new makerjs.models.Rectangle(mm(wM), mm(lM)); (lot as any).layer = 'RANH_DAT';
+    // Nhà phố: ranh đất = rộng × dài khách nhập. Phác thảo tự do (nhà vườn): ranh theo sân vườn quanh nhà
+    const lotR = plan.lot || { x: 0, y: -plan.frontSetbackM, w: wM, h: lM };
+    const lot = new makerjs.models.Rectangle(mm(lotR.w), mm(lotR.h)); lot.origin = [mm(lotR.x), mm(lotR.y + oy)]; (lot as any).layer = 'RANH_DAT';
     model.models!['RANH_DAT'] = lot;
-    const shell = new makerjs.models.Rectangle(mm(wM), mm(plan.houseLengthM)); shell.origin = [0, mm(oy)]; (shell as any).layer = 'TUONG_BAO';
+    const shell = new makerjs.models.Rectangle(mm(plan.widthM), mm(plan.houseLengthM)); shell.origin = [0, mm(oy)]; (shell as any).layer = 'TUONG_BAO';
     model.models!['TUONG_BAO'] = shell;
 
     plan.rooms.forEach((r, i) => {
