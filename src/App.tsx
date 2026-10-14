@@ -38,7 +38,9 @@ import {
   Unlock,
   FolderOpen,
   Film,
-  Play
+  Play,
+  ShieldCheck,
+  ExternalLink
 } from "lucide-react";
 import { translations, getTranslation } from "./translations";
 import jsPDF from "jspdf";
@@ -68,6 +70,7 @@ import { STRUCTURAL_OPTIONS } from "./data/structuralOptions";
 import { calculateFengShui, translateFengShuiAnalysis, getLunarBirthYear, getDefaultConstructionYear, getCanChi } from "./lib/fengshui";
 import { callGas, fetchVerifiedPackage, adminActivatePackage } from "./lib/gasClient";
 import { PaymentRequestModal } from "./components/PaymentRequestModal";
+import { SiteConditionsPanel } from "./components/SiteConditionsPanel";
 import { generateComprehensiveEstimate } from "./lib/constructionEstimate";
 import { applyUnifiedPricing } from "./lib/unifiedPricing";
 import { qnaGuideData } from "./data/qnaGuideData";
@@ -338,11 +341,10 @@ export default function App() {
             let errorMsg = data.error || "Mã bảo mật Admin không chính xác.";
             if (data.debugInfo) {
               const debug = data.debugInfo;
-              errorMsg += `\n\n🔍 [THÔNG TIN CHẨN ĐOÁN VERCEL]:\n` + 
-                `• Biến nhận được: ${debug.keysDetected.join(", ") || "TRỐNG (Chưa điền trên Vercel)"}\n` +
-                `• Số mật khẩu nạp: ${debug.codesLoadedCount}\n` +
-                `• Mật khẩu lưu trên Vercel (đã ẩn): ${debug.loadedMasked.join(", ") || "Không có"}\n` +
-                `• Mật khẩu bạn vừa nhập (đã ẩn): ${debug.inputMasked} (${debug.inputLength} ký tự)`;
+              errorMsg += `\n\n🔍 [CHẨN ĐOÁN]:\n` +
+                `• Biến máy chủ đọc được: ${(debug.keysDetected || []).join(", ") || "KHÔNG CÓ — chưa đặt ADMIN_CODE hoặc chưa Redeploy"}\n` +
+                `• Số mật khẩu đã nạp: ${debug.codesLoadedCount ?? 0}\n` +
+                `• Độ dài mật khẩu bạn vừa nhập: ${debug.inputLength ?? code.length} ký tự (so với mật khẩu đặt trên Vercel — lệch là do gõ thừa/thiếu dấu cách, chữ hoa/thường)`;
             }
             setAdminAuthError(errorMsg);
             return;
@@ -2086,7 +2088,10 @@ export default function App() {
         customerName: ten,
         showFurniture: true,
         desiredDirection: desiredDirection,
-        fengShuiAnalysis: fs
+        fengShuiAnalysis: fs,
+        rooms: ct?.rooms,
+        frontSetbackM: ct?.frontSetbackM,
+        backSetbackM: ct?.backSetbackM
       });
       const archSvgDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(archSvg)}`;
 
@@ -2667,6 +2672,8 @@ ${totalPages >= 3 ? `
 
   const handleOnboardingDone = (data: OnboardingData) => {
     setOnboardingDone(true);
+    // Tỉnh & loại đất khách chọn lúc đầu → đưa vào dữ liệu công trình (dùng cho dự toán & móng)
+    if (data) setConstructionInfo(prev => ({ ...prev, province: (prev as any).province || data.province, soilType: (prev as any).soilType || data.soilType } as any));
     syncLeadToServer();
   };
 
@@ -3660,6 +3667,12 @@ ${totalPages >= 3 ? `
                         </div>
                       </div>
 
+                      <SiteConditionsPanel
+                        theme={theme}
+                        constructionInfo={constructionInfo}
+                        setConstructionInfo={setConstructionInfo}
+                        customerAddress={userInfo?.address}
+                      />
 
                       <div className={`border rounded-2xl overflow-hidden ${
                         theme === 'dark' ? 'border-slate-800 bg-slate-950/20' : 'border-slate-200 bg-slate-50'
@@ -4035,6 +4048,8 @@ ${totalPages >= 3 ? `
                                   onExportSvgDataUrl={(url) => setFloorPlanSvgUrl(url)}
                                   fengShuiAnalysis={fengShuiAnalysis}
                                   desiredDirection={userInfo?.desiredDirection}
+                                  frontSetbackM={(constructionInfo as any).frontSetbackM}
+                                  backSetbackM={(constructionInfo as any).backSetbackM}
                                 />
                               ) : (
                                 <ElevationViewer 
@@ -4083,6 +4098,34 @@ ${totalPages >= 3 ? `
                               >
                                 {t.viewVideo3dPackages || "Xem các gói Video 3D"}
                               </button>
+                            </div>
+                          </div>
+
+                          {/* --- BỔ SUNG: BANNER MẠNG LƯỚI THỢ TẬN TỤY --- */}
+                          <div className={`mt-4 p-5 sm:p-6 rounded-2xl border-2 border-dashed ${theme === 'dark' ? 'bg-[#101524] border-blue-500/40' : 'bg-blue-50 border-blue-300'}`}>
+                            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                              <div className="flex items-center gap-4 text-left">
+                                <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white shrink-0 shadow-lg">
+                                  <ShieldCheck className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <h4 className={`text-sm sm:text-base font-black mb-1 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-700'}`}>
+                                    👷 Mạng Lưới "Thợ Tận Tụy" — Bảo Chứng Thi Công Trực Tiếp
+                                  </h4>
+                                  <p className={`text-xs sm:text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                                    Đội ngũ thợ lành nghề được đào tạo theo tiêu chuẩn kỹ thuật Yohu. Cam kết đúng tiến độ, bảo hành kết cấu, bám sát dự toán bóc tách.
+                                  </p>
+                                </div>
+                              </div>
+                              <a
+                                href="https://aistudio.google.com/apps/62de25f5-0959-4547-a723-46017c8af186?showPreview=true&showAssistant=true"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="w-full md:w-auto px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs sm:text-sm rounded-xl transition-colors shadow-lg whitespace-nowrap min-h-[46px] flex items-center justify-center gap-1.5"
+                              >
+                                <span>Kết Nối Đội Thợ</span>
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
                             </div>
                           </div>
                           

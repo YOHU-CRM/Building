@@ -54,6 +54,10 @@ export interface ConstructionInfo {
   loai_san?: string;
   loai_vach?: string;
   loai_tran?: string;
+  province?: string;            // Tỉnh/thành (34 tỉnh mới)
+  soilType?: string;            // tot | yeu | cat | chua_biet
+  frontSetbackM?: number | string; // Khoảng lùi trước (m) — trống = tự động
+  backSetbackM?: number | string;  // Khoảng lùi sau (m)
   // PA1 Traditional Reinforced Concrete fields
   mac_be_tong?: string;
   mac_thep?: string;
