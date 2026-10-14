@@ -24,6 +24,8 @@ export interface FloorPlanParams {
   rooms?: any;
   lang?: string;
   showSectorGrid?: boolean;
+  frontSetbackM?: number | string;
+  backSetbackM?: number | string;
 }
 
 const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -53,7 +55,8 @@ export function generateArchitecturalFloorPlanSvg(params: FloorPlanParams): stri
     widthM: params.widthM, lengthM: params.lengthM, floor: params.floor, totalFloors: params.totalFloors,
     desiredDirection: params.desiredDirection, fengShuiAnalysis: params.fengShuiAnalysis, rooms: params.rooms,
     requestedBedrooms: params.requestedBedrooms, requestedBathrooms: params.requestedBathrooms,
-    groundFloorArea: params.groundFloorArea, totalConstructionArea: params.totalConstructionArea
+    groundFloorArea: params.groundFloorArea, totalConstructionArea: params.totalConstructionArea,
+    frontSetbackM: params.frontSetbackM, backSetbackM: params.backSetbackM
   });
   return renderPlanSvg(plan, params);
 }

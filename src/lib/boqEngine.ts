@@ -10,9 +10,18 @@
  * - 10-Section Architectural & BOQ Technical Specification PDF Export
  */
 
+import { resolveLocation } from './vnProvinces.js';
+
 export type RegionKey = 'mien_bac' | 'mien_trung' | 'mien_nam' | 'do_thi_dac_biet' | 'mien_nui_hai_dao';
 export type StructuralOptionKey = 'PA1' | 'PA2' | 'PA3';
 export type FinishingPackageKey = 'tiet_kiem' | 'tieu_chuan' | 'cao_cap';
+
+/**
+ * HỆ SỐ HIỆU CHỈNH GIÁ THỊ TRƯỜNG — nút chỉnh DUY NHẤT để nâng/hạ toàn bộ đơn giá.
+ * 1.00 = giữ nguyên bảng đơn giá gốc. Ví dụ 1.15 = tăng tất cả 15%.
+ * Đội dự toán Yohu rà giá thị trường rồi chỉnh số này (màn hình, PDF, CRM cùng đổi).
+ */
+export const MARKET_CALIBRATION = 1.0;
 
 export const REGIONAL_FACTORS: Record<RegionKey, { name: string; factor: number }> = {
   mien_bac: { name: 'Miền Bắc', factor: 1.0 },
@@ -53,7 +62,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
     categoryName: '1. Kết Cấu Móng & Phần Thô',
     name: 'Bê tông móng băng/móng bè M250 đá 1x2 & Cốt thép móng theo thiết kế',
     unit: 'm²',
-    options: ['PA1'],
+    options: ['PA1', 'PA2', 'PA3'],
     laborRatio: 0.35,
     formulaDescription: '= diện tích xây dựng × 1,0 m²',
     computeQuantity: ({ dien_tich_xay_dung }) => {
@@ -132,7 +141,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       const q = Math.round(dien_tich_san);
       return { quantity: q, formattedQuantity: `${q} m² sàn` };
     },
-    unitPrices: { tiet_kiem: 1350000, tieu_chuan: 1650000, cao_cap: 2100000 },
+    unitPrices: { tiet_kiem: 900000, tieu_chuan: 1110000, cao_cap: 1410000 }, // định vị Yohu: PA2 giá giữa PA1 & PA3,
     specs: {
       tiet_kiem: 'Thép hình tổ hợp trong nước, sơn chống rỉ 1 lớp',
       tieu_chuan: 'Thép hình Posco/An Khánh tiêu chuẩn SS400, sơn Epoxy 2 lớp chống rỉ',
@@ -156,7 +165,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       const q = Number((dien_tich_san * 1.28).toFixed(1));
       return { quantity: q, formattedQuantity: `${q} m²` };
     },
-    unitPrices: { tiet_kiem: 290000, tieu_chuan: 360000, cao_cap: 460000 },
+    unitPrices: { tiet_kiem: 190000, tieu_chuan: 240000, cao_cap: 310000 }, // định vị Yohu: PA2 giá giữa PA1 & PA3,
     specs: {
       tiet_kiem: 'Panel EPS dày 50mm, tôn 0.35mm, xốp thường',
       tieu_chuan: 'Panel EPS dày 75mm, tôn mạ màu Nam Kim/Hoa Sen 0.40mm, xốp EPS chống cháy lan',
@@ -180,7 +189,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       const q = Math.round(dien_tich_san);
       return { quantity: q, formattedQuantity: `${q} m² sàn` };
     },
-    unitPrices: { tiet_kiem: 750000, tieu_chuan: 880000, cao_cap: 1050000 },
+    unitPrices: { tiet_kiem: 500000, tieu_chuan: 590000, cao_cap: 700000 }, // định vị Yohu: PA2 giá giữa PA1 & PA3,
     specs: {
       tiet_kiem: 'Đội thợ cơ khí phổ thông lắp ghép',
       tieu_chuan: 'Tổ thợ chuyên nghiệp siết bu-lông bằng máy cân lực, thợ bắn Cemboard lành nghề',
@@ -610,8 +619,12 @@ export interface FullProjectEstimateResult {
   regionKey: RegionKey;
   regionName: string;
   regionFactor: number;
-  dien_tich_san: number;
-  dien_tich_xay_dung: number;
+  dien_tich_san: number;            // sàn thực = diện tích xây dựng × số tầng
+  dien_tich_xay_dung: number;       // phần nhà chiếm đất
+  dien_tich_quy_doi: number;        // sàn + móng + mái quy đổi (để so sánh báo giá)
+  he_so_quy_doi: { mong: number; mai: number };
+  nen_mong: FoundationDecision;
+  loai_mai_tinh: RoofKind;
   so_tang: number;
   so_wc: number;
   so_phong_ngu?: number;
@@ -657,6 +670,61 @@ export interface FullProjectEstimateResult {
   }>;
 }
 
+export type RoofKind = 'ton' | 'ngoi' | 'btct' | 'thai_nhat';
+export interface FoundationDecision {
+  soil: 'tot' | 'yeu' | 'cat' | 'chua_biet';
+  foundation: 'bang' | 'coc' | 'be';
+  reason: string;
+  pile: { needed: boolean; caps: number; perCap: number; count: number; lengthM: number; meters: number };
+}
+
+function scalePrices(p: Record<FinishingPackageKey, number>, k: number): Record<FinishingPackageKey, number> {
+  return { tiet_kiem: Math.round(p.tiet_kiem * k), tieu_chuan: Math.round(p.tieu_chuan * k), cao_cap: Math.round(p.cao_cap * k) };
+}
+
+export function normalizeSoil(v?: string): FoundationDecision['soil'] {
+  const s = String(v || '').toLowerCase();
+  if (s === 'yeu' || s.includes('yếu') || s.includes('ao hồ') || s.includes('ruộng') || s.includes('san lấp')) return 'yeu';
+  if (s === 'cat' || s.includes('cát')) return 'cat';
+  if (s === 'tot' || s.includes('tốt') || s.includes('cứng') || s.includes('đồi')) return 'tot';
+  return 'chua_biet';
+}
+
+export function normalizeRoof(v: string | undefined, floors: number): RoofKind {
+  const s = String(v || '').toLowerCase();
+  if (s.includes('thái') || s.includes('nhật') || s.includes('thai') || s.includes('nhat')) return 'thai_nhat';
+  if (s.includes('tôn') || s.includes('ton') || s.includes('cấp 4') || s.includes('xưởng') || s.includes('tiền chế')) return 'ton';
+  if (s.includes('ngói') || s.includes('ngoi')) return 'ngoi';
+  if (s.includes('bằng') || s.includes('btct')) return 'btct';
+  return floors <= 1 ? 'ton' : 'btct';
+}
+
+/** Quyết định loại móng & ước lượng cọc (sơ bộ — chốt sau khảo sát địa chất) */
+export function decideFoundation(optionKey: StructuralOptionKey, soilRaw: string | undefined, floors: number, footprint: number, widthM?: number, houseLengthM?: number): FoundationDecision {
+  const soil = normalizeSoil(soilRaw);
+  const heavy = optionKey === 'PA1';
+  const needed =
+    soil === 'yeu' ? (heavy ? floors >= 2 : floors >= 3)
+    : soil === 'cat' ? (heavy ? floors >= 3 : floors >= 4)
+    : soil === 'tot' ? floors >= 6
+    : (heavy ? floors >= 4 : floors >= 5);
+  const W = widthM && widthM > 0 ? widthM : Math.max(4, Math.sqrt(footprint / 3));
+  const H = houseLengthM && houseLengthM > 0 ? houseLengthM : footprint / W;
+  const nx = Math.max(2, Math.ceil(W / 5.5) + 1);
+  const ny = Math.max(2, Math.ceil(H / 5) + 1);
+  const caps = nx * ny;
+  let perCap = floors <= 2 ? 1 : floors <= 4 ? 2 : floors <= 6 ? 3 : 4;
+  if (!heavy && floors >= 3) perCap = Math.max(1, perCap - 1);
+  const lengthM = soil === 'yeu' ? 18 : soil === 'cat' ? 12 : soil === 'tot' ? 10 : 15;
+  const count = needed ? caps * perCap : 0;
+  const foundation: FoundationDecision['foundation'] = needed ? 'coc' : soil === 'yeu' ? 'be' : 'bang';
+  const soilName = { tot: 'đất tốt', yeu: 'đất yếu', cat: 'đất cát', chua_biet: 'chưa khảo sát địa chất' }[soil];
+  const reason = needed
+    ? `${soilName}, ${floors} tầng → dự kiến móng cọc (${count} cọc × ${lengthM}m)`
+    : foundation === 'be' ? `${soilName}, tải trọng nhẹ → móng bè` : `${soilName}, ${floors} tầng → móng băng`;
+  return { soil, foundation, reason, pile: { needed, caps, perCap, count, lengthM, meters: count * lengthM } };
+}
+
 /**
  * Master Pricing Calculator
  */
@@ -672,6 +740,10 @@ export function calculateMasterProjectEstimate(params: {
   so_phong_ngu?: number;
   co_san_vuon?: boolean;
   loai_tran?: string;
+  soilType?: string;          // tot | yeu | cat | set | chua_biet (hoặc nhãn tiếng Việt)
+  roofType?: string;          // loại mái khách chọn / loại công trình (Tôn, Ngói, Mái Thái, Mái bằng...)
+  widthM?: number;            // chiều rộng nhà (để ước số cột/đài cọc)
+  houseLengthM?: number;      // chiều sâu nhà
 }): FullProjectEstimateResult {
   const optionKey: StructuralOptionKey = params.optionKey || 'PA1';
   const packageKey: FinishingPackageKey = params.packageKey || 'tieu_chuan';
@@ -679,18 +751,8 @@ export function calculateMasterProjectEstimate(params: {
   // Resolve Region
   let regionKey: RegionKey = params.regionKey || 'mien_bac';
   if (!params.regionKey && params.customerAddress) {
-    const addr = params.customerAddress.toLowerCase();
-    if (addr.includes('hà nội') || addr.includes('hồ chí minh') || addr.includes('tp.hcm') || addr.includes('sài gòn')) {
-      regionKey = 'do_thi_dac_biet';
-    } else if (addr.includes('đà nẵng') || addr.includes('huế') || addr.includes('quảng') || addr.includes('nghệ an') || addr.includes('hà tĩnh') || addr.includes('thanh hóa') || addr.includes('bình định') || addr.includes('khánh hòa')) {
-      regionKey = 'mien_trung';
-    } else if (addr.includes('bình dương') || addr.includes('đồng nai') || addr.includes('long an') || addr.includes('cần thơ') || addr.includes('vũng tàu') || addr.includes('tiền giang') || addr.includes('bến tre') || addr.includes('an giang')) {
-      regionKey = 'mien_nam';
-    } else if (addr.includes('hà giang') || addr.includes('lào cai') || addr.includes('lai châu') || addr.includes('điện biên') || addr.includes('sơn la') || addr.includes('phú quốc') || addr.includes('côn đảo')) {
-      regionKey = 'mien_nui_hai_dao';
-    } else {
-      regionKey = 'mien_bac';
-    }
+    // 34 tỉnh/thành mới (NQ 202/2025/QH15) + tên tỉnh cũ + hải đảo
+    regionKey = resolveLocation(params.customerAddress).region;
   }
 
   const regionInfo = REGIONAL_FACTORS[regionKey];
@@ -700,8 +762,15 @@ export function calculateMasterProjectEstimate(params: {
   const dien_tich_xay_dung = Math.max(20, params.dien_tich_xay_dung || 186.0);
   
   // S sàn quy đổi = diện tích xây dựng × (1.3 nếu 1 tầng, 2.2 nếu 2 tầng, 3.1 nếu 3 tầng, hoặc floors + 0.3)
-  const coeff = so_tang === 1 ? 1.3 : so_tang === 2 ? 2.2 : so_tang === 3 ? 3.1 : (so_tang + 0.3);
-  const dien_tich_san = params.dien_tich_san || Math.round(dien_tich_xay_dung * coeff * 10) / 10;
+  // ── Nền đất, móng, mái ──
+  const nenMong = decideFoundation(optionKey, params.soilType, so_tang, dien_tich_xay_dung, params.widthM, params.houseLengthM);
+  const roof = normalizeRoof(params.roofType, so_tang);
+  const K_MONG = { bang: 0.3, coc: 0.4, be: 0.5 }[nenMong.foundation];
+  const K_MAI = { ton: 0.3, ngoi: 0.7, btct: 0.5, thai_nhat: 0.7 }[roof];
+  // Sàn thực = diện tích xây dựng × số tầng (giá móng & mái đã có hạng mục riêng)
+  const dien_tich_san = params.dien_tich_san || Math.round(dien_tich_xay_dung * so_tang * 10) / 10;
+  // Diện tích quy đổi theo cách nhà thầu VN hay báo giá (để khách so sánh): sàn + móng + mái
+  const dien_tich_quy_doi = Math.round(dien_tich_xay_dung * (so_tang + K_MONG + K_MAI) * 10) / 10;
   const so_phong_ngu = params.so_phong_ngu;
   const so_wc = Math.max(1, params.so_wc || (so_tang === 1 ? 2 : Math.max(so_tang, 2)));
   const co_san_vuon = params.co_san_vuon !== undefined ? params.co_san_vuon : true;
@@ -746,6 +815,27 @@ export function calculateMasterProjectEstimate(params: {
         }
       }
 
+      // Móng: theo loại móng thực tế & tải trọng phương án
+      if (item.id === 'KC_MONG_BTCT') {
+        const optK = optionKey === 'PA1' ? 1 : optionKey === 'PA2' ? 0.75 : 0.8;
+        const fK = nenMong.foundation === 'be' ? 1.15 : nenMong.foundation === 'coc' ? 1.05 : 1;
+        item.unitPrices = scalePrices(origItem.unitPrices, optK * fK);
+        item.name = nenMong.foundation === 'coc'
+          ? 'Đài cọc + giằng móng BTCT M250 & cốt thép theo thiết kế (phần cọc tính riêng)'
+          : nenMong.foundation === 'be'
+          ? 'Móng bè BTCT M250 hai lớp thép (nền đất yếu, tải trọng nhẹ)'
+          : 'Móng băng BTCT M250 đá 1x2 & cốt thép móng theo thiết kế';
+      }
+      // Mái: theo loại mái khách chọn
+      if (item.id === 'HT_MAI') {
+        const rK = { ton: 0.85, ngoi: 1.0, btct: 0.9, thai_nhat: 1.6 }[roof];
+        item.unitPrices = scalePrices(origItem.unitPrices, rK);
+        item.name = roof === 'ton' ? 'Mái tôn cách nhiệt PU 3 lớp + xà gồ thép mạ kẽm & chống thấm'
+          : roof === 'ngoi' ? 'Mái ngói tráng men trên vì kèo thép nhẹ mạ kẽm & chống thấm'
+          : roof === 'thai_nhat' ? 'Mái Thái/Nhật: sàn mái BTCT dốc dán ngói + seno, chống thấm'
+          : 'Mái bằng BTCT: chống thấm 2 lớp + lát gạch chống nóng, tôn che tum';
+      }
+
       const { quantity, formattedQuantity } = item.computeQuantity({
         dien_tich_san,
         dien_tich_xay_dung,
@@ -759,7 +849,7 @@ export function calculateMasterProjectEstimate(params: {
 
       const baseUnitPrice = item.unitPrices[pkg];
       // Apply regional price factor
-      const unitPrice = Math.round((baseUnitPrice * regionFactor) / 100) * 100;
+      const unitPrice = Math.round((baseUnitPrice * regionFactor * MARKET_CALIBRATION) / 100) * 100;
       const totalAmount = Math.round(quantity * unitPrice);
 
       const laborRatio = item.laborRatio !== undefined ? item.laborRatio : 0.30;
@@ -785,18 +875,46 @@ export function calculateMasterProjectEstimate(params: {
       });
     });
 
+    // Ép cọc (khi nền yếu / nhà cao tầng)
+    if (nenMong.pile.needed) {
+      const pilePrice: Record<FinishingPackageKey, number> = { tiet_kiem: 290000, tieu_chuan: 340000, cao_cap: 420000 };
+      const pileSize: Record<FinishingPackageKey, string> = { tiet_kiem: '200×200', tieu_chuan: '250×250', cao_cap: '300×300' };
+      const mobil: Record<FinishingPackageKey, number> = { tiet_kiem: 18000000, tieu_chuan: 22000000, cao_cap: 28000000 };
+      const addLine = (def: MasterBOQItemDef, quantity: number, formattedQuantity: string, unitPriceBase: number) => {
+        const unitPrice = Math.round((unitPriceBase * regionFactor * MARKET_CALIBRATION) / 100) * 100;
+        const totalAmount = Math.round(quantity * unitPrice);
+        const lr = def.laborRatio ?? 0.3;
+        const lab = Math.round(totalAmount * lr);
+        sumBoq += totalAmount; sumLabor += lab; sumMaterial += totalAmount - lab;
+        lines.push({ item: def, quantity, formattedQuantity, formattedQty: formattedQuantity, unitPrice,
+          formattedUnitPrice: `${unitPrice.toLocaleString('vi-VN')} đ`, totalAmount,
+          formattedTotalAmount: `${totalAmount.toLocaleString('vi-VN')} đ`, materialAmount: totalAmount - lab, laborAmount: lab, spec: def.specs[pkg] });
+      };
+      const base = { category: 'foundation' as const, categoryName: '1. Kết Cấu Móng & Phần Thô', options: ['PA1', 'PA2', 'PA3'] as StructuralOptionKey[],
+        computeQuantity: () => ({ quantity: 0, formattedQuantity: '' }), technicalNote: 'Chốt số cọc, chiều dài & tải trọng sau khoan khảo sát địa chất và thiết kế kết cấu (TCVN 10304:2014).',
+        clientExplanation: 'Cọc truyền tải trọng nhà xuống lớp đất chắc bên dưới, chống lún nứt trên nền yếu.' };
+      addLine({ ...base, id: 'KC_COC_EP', name: `Ép cọc BTCT ${pileSize[pkg]} (dự kiến ${nenMong.pile.count} cọc × ${nenMong.pile.lengthM}m)`, unit: 'm cọc', laborRatio: 0.25,
+        formulaDescription: `= ${nenMong.pile.caps} đài × ${nenMong.pile.perCap} cọc × ${nenMong.pile.lengthM}m`, unitPrices: pilePrice,
+        specs: { tiet_kiem: 'Cọc BTCT 200×200 mác 250, ép tải', tieu_chuan: 'Cọc BTCT 250×250 mác 300, ép robot/ép neo', cao_cap: 'Cọc BTCT 300×300 mác 300 hoặc cọc ly tâm D300, ép robot có nhật ký lực ép' } },
+        nenMong.pile.meters, `${nenMong.pile.meters} m cọc`, pilePrice[pkg]);
+      addLine({ ...base, id: 'KC_COC_MAY', name: 'Vận chuyển, lắp đặt máy ép cọc & nối cọc, nén tĩnh thử tải (gói)', unit: 'Gói', laborRatio: 0.6,
+        formulaDescription: '1 gói', unitPrices: mobil,
+        specs: { tiet_kiem: 'Máy ép tải sắt', tieu_chuan: 'Máy ép robot / ép neo phù hợp ngõ hẻm', cao_cap: 'Máy ép robot + nén tĩnh thử tải 1 cọc' } },
+        1, '1 Gói', mobil[pkg]);
+    }
+
     // Chi phí chung = 6.2% tổng BOQ (quản lý, giám sát, giàn giáo bảo hiểm an toàn)
     const chi_phi_chung_rate = pkg === 'tiet_kiem' ? 0.058 : pkg === 'tieu_chuan' ? 0.062 : 0.068;
     const chi_phi_chung = Math.round(sumBoq * chi_phi_chung_rate);
 
     const finalContractTotal = sumBoq + chi_phi_chung;
-    const finalRatePerSqm = Math.round(finalContractTotal / dien_tich_san);
+    const finalRatePerSqm = Math.round(finalContractTotal / dien_tich_quy_doi); // suất / m² quy đổi (cách báo giá phổ biến)
 
     // Gia chủ khoán nhân công: Nhân công thực tế + phần chi phí quản lý kỹ thuật/giàn giáo (60% của chi phí chung)
     const laborOnlyOverhead = Math.round(chi_phi_chung * 0.60);
     const tong_khoan_nhan_cong = sumLabor + laborOnlyOverhead;
     const tong_vat_tu_thiet_bi = finalContractTotal - tong_khoan_nhan_cong;
-    const laborRatePerSqm = Math.round(tong_khoan_nhan_cong / dien_tich_san);
+    const laborRatePerSqm = Math.round(tong_khoan_nhan_cong / dien_tich_quy_doi);
 
     // Add CP_CHUNG line
     const cpChungDef: MasterBOQItemDef = {
@@ -862,6 +980,10 @@ export function calculateMasterProjectEstimate(params: {
     regionFactor,
     dien_tich_san,
     dien_tich_xay_dung,
+    dien_tich_quy_doi,
+    he_so_quy_doi: { mong: K_MONG, mai: K_MAI },
+    nen_mong: nenMong,
+    loai_mai_tinh: roof,
     so_tang,
     so_wc,
     so_phong_ngu,

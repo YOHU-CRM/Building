@@ -48,8 +48,7 @@ export function generateComprehensiveEstimate(
   userInfo?: any
 ): ComprehensiveEstimate {
   void aiResult;
-  // 1. Diện tích tính giá — dùng chung bộ đọc với mọi nơi khác
-  const area = parsePricingArea(ct?.dimensions).area;
+  void parsePricingArea;
 
   const floors = Math.max(1, Math.min(50, Number(ct?.floors) || 1));
   const soilType = ct?.soilType || "chua_biet";
@@ -71,25 +70,29 @@ export function generateComprehensiveEstimate(
   // Current active master estimate for structural solution text
   const masterEstimate = optKey === 'PA1' ? estPA1 : optKey === 'PA2' ? estPA2 : estPA3;
 
-  const totalFloorArea = masterEstimate.dien_tich_san;
+  const totalFloorArea = masterEstimate.dien_tich_quy_doi;
+  const area = masterEstimate.dien_tich_xay_dung;          // diện tích xây dựng (đã trừ khoảng lùi)
+  const site = masterEstimate.meta.site;
+  const nm = masterEstimate.nen_mong;
 
   const fmtVND = (num: number) => {
     return new Intl.NumberFormat('vi-VN').format(num) + ' đ';
   };
 
   // 3. Giải pháp kết cấu theo quy mô & loại đất & loại kết cấu
+  // Móng: thuyết minh khớp đúng hạng mục móng trong bảng dự toán (cùng 1 quyết định nen_mong)
   let foundationStr = "";
-  if (isEpsMonolithic) {
-    foundationStr = `Hệ kết cấu Bê tông nhẹ hạt xốp EPS & Gông 3D có tải trọng siêu nhẹ (giảm 50% - 65% so với nhà gạch truyền thống), áp lực đáy móng cực thấp. Với nhà thấp tầng trên nền đất tốt, thường có thể dùng móng băng/móng bè thay cho móng cọc — BẮT BUỘC kiểm tra bằng khoan khảo sát địa chất và tính toán kết cấu trước khi chốt phương án móng:
-- Nền đất tốt/liền thổ: Móng băng BTCT rộng 0.8 - 1.2m, đan thép D10, bê tông M250 dày 25cm. Để rãnh ngàm sâu 5cm trên mặt dầm bo móng sập ngàm chân khung vách 15cm và để râu thép D10 liên kết.
-- Nền đất yếu/san lấp: Móng bè BTCT toàn diện đan 2 lớp thép D10 a200, bê tông dày 15-20cm phân bổ đều tải trọng tuyệt đối, dầm bo viền cao 30cm có rãnh ngàm chống trượt, giảm nguy cơ lún lệch.`;
-  } else if (soilType === "yeu" || soilType === "cat" || floors > 3) {
-    foundationStr = `Móng cọc BTCT ép tải 200x200 hoặc cọc khoan nhồi D400 (do điều kiện địa chất ${soilType === 'yeu' ? 'đất yếu' : soilType === 'cat' ? 'đất cát' : 'tải trọng cao'}), đài cọc liên kết giằng mác 300, tuân thủ nghiêm ngặt tiêu chuẩn thiết kế nền móng TCVN 10304:2014.`;
-  } else if (soilType === "tot" && floors <= 2) {
-    foundationStr = "Móng đơn hoặc móng băng bê tông cốt thép (B20/Mác 250), giằng móng 200x300, thép chịu lực chủ động. Phù hợp tải trọng trên nền đất tốt liền thổ theo TCVN 9362:2012.";
+  if (nm.foundation === 'coc') {
+    foundationStr = `Móng cọc: ${nm.reason}. Dự kiến ${nm.pile.caps} đài cọc × ${nm.pile.perCap} cọc BTCT 250×250, dài ~${nm.pile.lengthM}m, đài + giằng BTCT M250. Số cọc, chiều dài và sức chịu tải PHẢI chốt sau khoan khảo sát địa chất & thiết kế kết cấu (TCVN 10304:2014); nên ép thử/nén tĩnh 1 cọc trước khi ép đại trà.`;
+  } else if (nm.foundation === 'be') {
+    foundationStr = `Móng bè BTCT 2 lớp thép, dầm bo viền: ${nm.reason}. Phân bổ đều tải trọng, giảm lún lệch. Cần khảo sát địa chất để xác nhận không cần cọc.`;
   } else {
-    foundationStr = `Móng băng giao thoa 2 phương kết hợp cọc tràm hoặc cọc ép phụ trợ, bê tông thương phẩm mác 250 (PCB40), kiểm soát độ lún theo TCVN 9362:2012 và TCVN 10304:2014.`;
+    foundationStr = `Móng băng BTCT M250 giao thoa 2 phương, giằng móng 200×300: ${nm.reason}. Kiểm soát lún theo TCVN 9362:2012. Nếu khi đào móng gặp đất yếu/ao lấp, chuyển sang móng cọc (dự toán tăng — xem mục ép cọc khi chọn "đất yếu").`;
   }
+  if (isEpsMonolithic) {
+    foundationStr += ` Với vách EPS đúc liền khối: để rãnh ngàm 5cm trên dầm bo móng và chờ râu thép D10 liên kết chân vách.`;
+  }
+  void soilType;
 
   const columnsBeamsStr = isEpsMonolithic
     ? "Hệ khung cột chịu lực chính (200x200mm, 4 cốt thép D14 CB300/CB400) được lắp ghép định hình và đổ bê tông đúc liền khối đồng thời cùng với vách bê tông nhẹ EPS 15cm trong một mẻ (Monolithic Casting không mạch ngừng). Thép dọc D10 vách liên kết ngàm vào đai cột, tạo khối hộp không gian liên kết tốt, giảm nứt tại vị trí giao cột - tường. Tiết diện và cốt thép cột phải được kỹ sư kết cấu tính theo số tầng và nhịp thực tế."
@@ -156,6 +159,31 @@ export function generateComprehensiveEstimate(
       workContent: "Lắp đặt tủ bếp An Cường, thiết bị vệ sinh Inax/Toto, đèn LED Panasonic, kiểm tra áp lực nước, vệ sinh công nghiệp và bàn giao chìa khóa trao tay.",
       percentage: "10% giá trị hợp đồng"
     }
+  ] : isSteelFrame ? [
+    {
+      phase: "Giai đoạn 1: Móng & chân đế cột thép",
+      duration: nm.foundation === 'coc' ? "12 - 18 ngày (gồm ép cọc)" : "08 - 12 ngày",
+      workContent: "Đào móng, đổ bê tông móng/đài giằng, chôn bulông neo chân cột đúng cao độ, lắp bể tự hoại.",
+      percentage: "20% giá trị hợp đồng"
+    },
+    {
+      phase: "Giai đoạn 2: Gia công & lắp dựng khung thép",
+      duration: `${String(4 * floors + 4).padStart(2, '0')} - ${String(5 * floors + 6).padStart(2, '0')} ngày (gia công xưởng song song với làm móng)`,
+      workContent: "Gia công cột dầm thép tại xưởng, sơn chống rỉ, cẩu lắp dựng, siết bulông cường độ cao, lắp dầm phụ.",
+      percentage: "35% giá trị hợp đồng"
+    },
+    {
+      phase: "Giai đoạn 3: Sàn Cemboard, vách panel & mái",
+      duration: `${String(3 * floors + 5).padStart(2, '0')} - ${String(4 * floors + 7).padStart(2, '0')} ngày`,
+      workContent: "Bắn sàn Cemboard, lắp vách panel, đi ống điện nước, lợp mái và chống thấm.",
+      percentage: "25% giá trị hợp đồng"
+    },
+    {
+      phase: "Giai đoạn 4: Hoàn thiện & bàn giao",
+      duration: `${String(3 * floors + 10).padStart(2, '0')} - ${String(4 * floors + 15).padStart(2, '0')} ngày`,
+      workContent: "Xử lý mối nối, bả sơn, lát sàn, lắp cửa, thiết bị vệ sinh, đèn, vệ sinh công nghiệp và bàn giao.",
+      percentage: "20% giá trị hợp đồng"
+    }
   ] : [
     {
       phase: "Giai đoạn 1: Chuẩn bị mặt bằng & Thi công móng",
@@ -192,7 +220,7 @@ export function generateComprehensiveEstimate(
   // 6. Khuyến nghị chuyên gia & Giải thích diện tích sàn
   const coefUsed = (Math.round((totalFloorArea / area) * 100) / 100);
   const expertRecommendations = [
-    `📐 DIỆN TÍCH TÍNH GIÁ: Diện tích xây dựng (phần nhà chiếm đất) ${area}m² × ${floors} tầng, cộng phần móng và mái quy đổi → tổng ${totalFloorArea}m² (hệ số ${coefUsed}). Lưu ý: nếu ${area}m² là DIỆN TÍCH ĐẤT thì phần nhà thực tế thường nhỏ hơn do khoảng lùi và mật độ xây dựng — dự toán sẽ giảm tương ứng.`,
+    `📐 DIỆN TÍCH: ${site.note} Sàn thực ${masterEstimate.dien_tich_san}m² (${area}m² × ${floors} tầng). Quy đổi theo cách nhà thầu báo giá: sàn + móng ${masterEstimate.he_so_quy_doi.mong} + mái ${masterEstimate.he_so_quy_doi.mai} = ${totalFloorArea}m² (hệ số ${coefUsed}) — dùng để so sánh đơn giá/m² với báo giá khác.`,
     `⚖️ TỔNG DỰ TOÁN phương án đã chọn: ${fmtVND(masterEstimate.tong_tron_goi)} (${masterEstimate.formatted_suat_dau_tu_m2}), chưa gồm: VAT, chi phí xin phép xây dựng, thiết kế, khảo sát địa chất, ép cọc (nếu địa chất yếu), phá dỡ nhà cũ, nội thất rời. Sai số dự toán sơ bộ ±10–15%.`,
     `🛡️ VẬT TƯ: Chủng loại & thương hiệu ghi trong bảng là đề xuất theo gói; hợp đồng thi công cần ghi rõ mã sản phẩm để gia chủ nghiệm thu.`,
     isEpsMonolithic

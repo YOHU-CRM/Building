@@ -1,3 +1,4 @@
+import { computeSite } from './siteGeometry';
 /**
  * Architectural Layout Model
  * Authoritative single source of truth for 2D Floor Plan rendering,
@@ -66,6 +67,8 @@ export interface ArchitecturalLayoutModel {
 }
 
 export interface LayoutModelInputParams {
+  frontSetbackM?: number | string;
+  backSetbackM?: number | string;
   widthM?: number;
   lengthM?: number;
   floors?: number;
@@ -133,9 +136,11 @@ export function computeArchitecturalLayoutModel(params: LayoutModelInputParams):
   const currentFloor = Math.max(1, Math.min(floors, params.currentFloor || 1));
   const lotAreaM2 = Math.round(widthM * lengthM);
 
-  const frontSetbackM = lengthM >= 12 ? 2.0 : 1.0;
-  const backSetbackM = lengthM >= 12 ? 1.0 : 0.5;
-  const houseLengthM = Math.max(5, lengthM - frontSetbackM - backSetbackM);
+  // Khoảng lùi: lấy theo khách nhập, nếu không có thì mặc định (dùng chung với dự toán — siteGeometry)
+  const site = computeSite(`${widthM}x${lengthM}`, params.frontSetbackM, params.backSetbackM);
+  const frontSetbackM = site.frontSetbackM;
+  const backSetbackM = site.backSetbackM;
+  const houseLengthM = Math.max(4, site.houseLengthM);
 
   const calculatedGroundArea = Math.round(widthM * houseLengthM);
   const groundFloorArea = (params.groundFloorArea && params.groundFloorArea > 0)

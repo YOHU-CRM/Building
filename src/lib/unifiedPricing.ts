@@ -12,8 +12,9 @@ import {
   StructuralOptionKey,
   FinishingPackageKey
 } from './boqEngine.js';
+import { computeSite, SiteGeometry } from './siteGeometry.js';
 
-export const PRICING_VERSION = '2026.10';
+export const PRICING_VERSION = '2026.10b';
 
 export interface PricingInput {
   constructionInfo?: any;
@@ -65,24 +66,29 @@ export function resolveAddress(ct?: any, userInfo?: any): string {
 
 /** Tính dự toán chuẩn — HÀM DUY NHẤT gọi bộ máy BOQ */
 export function getUnifiedEstimate(input: PricingInput): FullProjectEstimateResult & {
-  meta: { version: string; areaInput: number; widthM: number; lengthM: number; address: string };
+  meta: { version: string; areaInput: number; widthM: number; lengthM: number; address: string; site: SiteGeometry };
 } {
   const ct = input.constructionInfo || {};
-  const { area, widthM, lengthM } = parsePricingArea(ct.dimensions);
+  // Kích thước khách nhập là kích thước ĐẤT → trừ khoảng lùi ra diện tích xây dựng (giống bản vẽ)
+  const site = computeSite(ct.dimensions, ct.frontSetbackM, ct.backSetbackM);
   const floors = Math.max(1, Math.min(50, Math.round(Number(ct.floors) || 1)));
   const address = resolveAddress(ct, input.userInfo);
   const est = calculateMasterProjectEstimate({
     optionKey: input.optionKey || resolveOptionKey(ct.loai_ket_cau_chinh),
     packageKey: input.packageKey || resolvePackageKey(ct.finishingPackage),
-    dien_tich_xay_dung: area,
+    dien_tich_xay_dung: site.footprint,
     so_tang: floors,
     so_phong_ngu: Number(ct.rooms?.bedroomCount) || undefined,
     so_wc: Number(ct.rooms?.bathroomCount) || undefined,
     customerAddress: address || 'Miền Bắc',
     co_san_vuon: ct.rooms?.garden !== false,
-    loai_tran: ct.loai_tran
+    loai_tran: ct.loai_tran,
+    soilType: ct.soilType,
+    roofType: ct.loai_mai || ct.constructionType,
+    widthM: site.lotWidthM,
+    houseLengthM: site.houseLengthM
   });
-  return Object.assign(est, { meta: { version: PRICING_VERSION, areaInput: area, widthM, lengthM, address } });
+  return Object.assign(est, { meta: { version: PRICING_VERSION, areaInput: site.footprint, widthM: site.lotWidthM, lengthM: site.lotLengthM, address, site } });
 }
 
 const vnd = (n: number) => `${Math.round(n).toLocaleString('vi-VN')} đ`;
@@ -142,11 +148,15 @@ export function applyUnifiedPricing<T extends Record<string, any>>(report: T, in
     region: est.regionName,
     regionFactor: est.regionFactor,
     areaInput: est.meta.areaInput,
-    floorAreaConverted: est.dien_tich_san,
+    floorAreaConverted: est.dien_tich_quy_doi,
+    floorAreaReal: est.dien_tich_san,
+    footprint: est.dien_tich_xay_dung,
+    siteNote: est.meta.site.note,
+    foundation: est.nen_mong.reason,
     floors: est.so_tang,
     total: est.tong_tron_goi,
     perM2: est.suat_dau_tu_m2,
-    note: `Dự toán sơ bộ theo bảng đơn giá Yohu ${est.meta.version} (${optName}, ${est.regionName}). Chưa gồm VAT, xin phép, thiết kế, khảo sát địa chất, ép cọc (nếu cần), phá dỡ, nội thất rời. Sai số ±10–15%.`
+    note: `${est.meta.site.note} Móng: ${est.nen_mong.reason}. Dự toán sơ bộ theo bảng đơn giá Yohu ${est.meta.version} (${optName}, ${est.regionName}). Chưa gồm VAT, xin phép, thiết kế, khảo sát địa chất, phá dỡ, nội thất rời. Sai số ±10–15%.`
   };
   return {
     ...report,

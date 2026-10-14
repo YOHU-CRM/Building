@@ -118,7 +118,9 @@ export async function exportSpecificationToPdf({
     totalConstructionArea: sTotal,
     requestedBedrooms: constructionInfo?.rooms?.bedroomCount,
     requestedBathrooms: constructionInfo?.rooms?.bathroomCount,
-    rooms: constructionInfo?.rooms
+    rooms: constructionInfo?.rooms,
+    frontSetbackM: (constructionInfo as any)?.frontSetbackM,
+    backSetbackM: (constructionInfo as any)?.backSetbackM
   });
   const floorPlanSvgDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(floorPlanSvg)}`;
 

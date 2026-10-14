@@ -77,6 +77,8 @@ export interface PlannerInput {
   requestedBathrooms?: number;
   groundFloorArea?: number;
   totalConstructionArea?: number;
+  frontSetbackM?: number | string;
+  backSetbackM?: number | string;
 }
 
 /* ───────────────────────── HƯỚNG & 9 CUNG ───────────────────────── */
@@ -158,7 +160,8 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
     groundFloorArea: input.groundFloorArea, totalConstructionArea: input.totalConstructionArea,
     requestedBedrooms: input.requestedBedrooms ?? roomsCfg.bedroomCount,
     requestedBathrooms: input.requestedBathrooms ?? roomsCfg.bathroomCount,
-    roomsConfig: roomsCfg, fengShuiAnalysis: fs
+    roomsConfig: roomsCfg, fengShuiAnalysis: fs,
+    frontSetbackM: input.frontSetbackM, backSetbackM: input.backSetbackM
   });
   const frontSB = layout.frontSetbackM;
   const backSB = layout.backSetbackM;
