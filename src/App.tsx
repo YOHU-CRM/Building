@@ -1337,25 +1337,45 @@ export default function App() {
   };
 
   const handleApplyExtractedData = (data: any) => {
-    if (data.ho_ten || data.so_dt || data.dia_chi) {
+    // Hướng nhà: khách ghi riêng, hoặc chữ hướng viết trên bản vẽ tay (vd "H Nam" dưới cửa chính)
+    const hpt = String(data.bo_tri_phac_thao?.co_phac_thao !== false ? (data.bo_tri_phac_thao?.huong_mat_tien || '') : '').trim();
+    const huongTuPhacThao = hpt.length <= 12 && /^(bắc|nam|đông|tây)/i.test(hpt) ? hpt : '';
+    if (data.ho_ten || data.so_dt || data.dia_chi || data.huong_muon || huongTuPhacThao) {
       setUserInfo((prev) => ({
         ...prev,
         name: data.ho_ten || prev.name,
         phone: data.so_dt || prev.phone,
         address: data.dia_chi || prev.address,
-        desiredDirection: data.huong_muon || prev.desiredDirection
+        desiredDirection: data.huong_muon || huongTuPhacThao || prev.desiredDirection
       }));
     }
+    // Kích thước đất từ sổ đỏ: dùng bề rộng TRUNG BÌNH nếu nở hậu / tóp hậu
+    const kd = data.kich_thuoc_dat || {};
+    const wF = parseFloat(String(kd.rong_truoc ?? '').replace(',', '.')), wB = parseFloat(String(kd.rong_sau ?? '').replace(',', '.')), dL = parseFloat(String(kd.dai ?? '').replace(',', '.'));
+    const avgW = !isNaN(wF) && wF > 0 ? (!isNaN(wB) && wB > 0 ? Math.round((wF + wB) / 2 * 10) / 10 : wF) : NaN;
+    const dimsFromLot = !isNaN(avgW) && !isNaN(dL) && dL > 0 ? `${avgW}x${dL}` : '';
     setConstructionInfo((prev: any) => ({
       ...prev,
       constructionType: data.loai_ct || prev.constructionType,
-      dimensions: data.dien_tich || prev.dimensions,
+      dimensions: dimsFromLot || data.dien_tich || prev.dimensions,
+      soilType: data.loai_dat && data.loai_dat !== 'chua_biet' ? data.loai_dat : prev.soilType,
+      frontSetbackM: data.khoang_lui_truoc ?? prev.frontSetbackM,
+      backSetbackM: data.khoang_lui_sau ?? prev.backSetbackM,
+      rooms: {
+        ...(prev.rooms || {}),
+        ...(Number(data.so_phong_ngu) > 0 ? { bedroomCount: Number(data.so_phong_ngu) } : {}),
+        ...(Number(data.so_wc) > 0 ? { bathroomCount: Number(data.so_wc) } : {}),
+        ...(typeof data.phong_tho === 'boolean' ? { worshipRoom: data.phong_tho } : {}),
+        ...(data.gara ? { parkingType: data.gara === 'oto' ? 'garage' : data.gara === 'khong' ? 'none' : 'yard' } : {}),
+        // Bố trí theo phác thảo tay (bộ vẽ mặt bằng đọc trường này)
+        sketchLayout: data.bo_tri_phac_thao && Array.isArray(data.bo_tri_phac_thao.tang) && data.bo_tri_phac_thao.tang.length ? data.bo_tri_phac_thao : (prev.rooms || {}).sketchLayout
+      },
       floors: Number(data.so_tang) || prev.floors,
       totalBudget: data.ngan_sach ? parseFloat(data.ngan_sach) || prev.totalBudget : prev.totalBudget,
       loai_ket_cau_chinh: data.loai_ket_cau_chinh || prev.loai_ket_cau_chinh || "Bê tông cốt thép truyền thống",
       so_mat_tien: Number(data.so_mat_tien) || prev.so_mat_tien || 1,
       thep_hop_cot: data.thep_hop_cot || prev.thep_hop_cot || "100x100mm",
-      loai_mai: data.loai_mai || prev.loai_mai || "Tôn lạnh",
+      loai_mai: data.loai_mai || prev.loai_mai || "",
       loai_san: data.loai_san || prev.loai_san || "Cemboard",
       loai_vach: data.loai_vach || prev.loai_vach || "Panel EPS",
       loai_tran: data.loai_tran || prev.loai_tran || "Nhựa Nano",
