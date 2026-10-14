@@ -11,7 +11,7 @@ import {
   FullProjectEstimateResult,
   StructuralOptionKey,
   FinishingPackageKey
-} from './boqEngine';
+} from './boqEngine.js';
 
 export const PRICING_VERSION = '2026.10';
 
