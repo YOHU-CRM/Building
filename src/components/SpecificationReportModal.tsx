@@ -118,7 +118,10 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
     fengShuiAnalysis,
     groundFloorArea: sGround,
     totalConstructionArea: sTotal,
-    lang
+    lang,
+    rooms: constructionInfo?.rooms,
+    frontSetbackM: (constructionInfo as any)?.frontSetbackM,
+    backSetbackM: (constructionInfo as any)?.backSetbackM
   });
 
   // Cache helper functions for browser-persistent storage

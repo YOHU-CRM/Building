@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { PROVINCE_NAMES_2025 } from '../lib/vnProvinces';
 import { OnboardingData } from '../types';
 
 export const PROVINCE_REGION_MAP: Record<string, { region: string; donGia: { min: number; max: number } }> = {
@@ -107,11 +108,11 @@ const OnboardingPopup: React.FC<{
   const [step, setStep] = useState(1);
   const [birthYear, setBirthYear] = useState<number>(1990);
   const [gender, setGender]   = useState<'nam' | 'nu'>('nam');
-  const [province, setProvince] = useState<string>('Hưng Yên');
+  const [province, setProvince] = useState<string>('Hà Nội');
   const [soilType, setSoilType] = useState<string>('chua_biet');
   const [archStyle, setArchStyle] = useState<string>('hien_dai');
 
-  const provinces = Object.keys(PROVINCE_REGION_MAP);
+  const provinces = PROVINCE_NAMES_2025; // 34 tỉnh/thành mới (NQ 202/2025/QH15)
   const years     = Array.from({ length: 70 }, (_, i) => 2005 - i);
 
   const ob = (t as any).onboarding || {};

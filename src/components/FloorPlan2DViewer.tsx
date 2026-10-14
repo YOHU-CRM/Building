@@ -18,6 +18,8 @@ interface FloorPlan2DViewerProps {
   elevationSvgElement?: SVGElement | null;
   fengShuiAnalysis?: any;
   desiredDirection?: string;
+  frontSetbackM?: number | string;
+  backSetbackM?: number | string;
 }
 
 export default function FloorPlan2DViewer({
@@ -31,7 +33,9 @@ export default function FloorPlan2DViewer({
   onExportSvgDataUrl,
   elevationSvgElement,
   fengShuiAnalysis,
-  desiredDirection
+  desiredDirection,
+  frontSetbackM,
+  backSetbackM
 }: FloorPlan2DViewerProps) {
   const houseFacing = desiredDirection || fengShuiAnalysis?.directionVerdict?.direction || "Nam";
   const [activeFloor, setActiveFloor] = useState<number>(1);
@@ -65,7 +69,7 @@ export default function FloorPlan2DViewer({
   const generateFloorPlanModel = (floorIdx: number, wM: number, lM: number, furniture: boolean, roomsData: any, _rules: any) => {
     const plan = planFloor({
       widthM: wM, lengthM: lM, floor: floorIdx, totalFloors,
-      desiredDirection: houseFacing, fengShuiAnalysis, rooms: roomsData,
+      desiredDirection: houseFacing, frontSetbackM, backSetbackM, fengShuiAnalysis, rooms: roomsData,
       requestedBedrooms: roomsData?.bedroomCount, requestedBathrooms: roomsData?.bathroomCount
     });
     const mm = (m: number) => Math.round(m * 1000);
@@ -128,7 +132,7 @@ export default function FloorPlan2DViewer({
     constructionType,
     customerName,
     showFurniture,
-    desiredDirection: houseFacing,
+    desiredDirection: houseFacing, frontSetbackM, backSetbackM,
     fengShuiAnalysis,
     rooms,
     requestedBedrooms: rooms?.bedroomCount,
@@ -153,7 +157,7 @@ export default function FloorPlan2DViewer({
           constructionType,
           customerName,
           showFurniture: true,
-          desiredDirection: houseFacing,
+          desiredDirection: houseFacing, frontSetbackM, backSetbackM,
           fengShuiAnalysis,
           rooms,
           requestedBedrooms: rooms?.bedroomCount,
