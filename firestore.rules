@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Ai cũng XEM được mẫu thiết kế; chỉ máy chủ (Firebase Admin) mới được sửa/xóa
+    match /designSamples/{sampleId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Gói đã kích hoạt & mã kích hoạt đã dùng — chỉ máy chủ truy cập
+    match /packages/{clientId} {
+      allow read, write: if false;
+    }
+    match /usedCodes/{code} {
+      allow read, write: if false;
+    }
+    match /leads/{leadId} {
+      allow read, write: if false;
+    }
+    match /clientDocuments/{docId} {
+      allow read, write: if false;
+    }
+    match /commissions/{commId} {
+      allow read, write: if false;
+    }
+    match /rateLimits/{ip} {
+      allow read, write: if false;
+    }
+    match /ctvPartners/{docId} {
+      allow read, write: if false;
+    }
+    match /videoOrders/{docId} {
+      allow read, write: if false;
+    }
+  }
+}
+

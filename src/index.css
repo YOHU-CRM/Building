@@ -1,0 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Merriweather", Georgia, Cambria, "Times New Roman", serif;
+}
+
+/* Enforce vertical scrolling on html/body so laptop screens have browser scrollbars if high container overflows */
+html, body {
+  overflow-y: auto !important;
+  height: auto !important;
+  min-height: 100vh;
+}
+
+/* Custom visible scrollbars for better desktop dragging experience */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.65);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(220, 38, 38, 0.75); /* Highly visible crimson red theme-matching color */
+  border-radius: 9999px;
+  border: 1.5px solid rgba(15, 23, 42, 0.4);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(220, 38, 38, 1); /* Vivid full red on hover */
+}
+
+/* Explicit class-based scrollbars for the inner content container on all browsers (including Firefox) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px !important;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.75) !important;
+  border-radius: 9999px !important;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(220, 38, 38, 0.75) !important; /* Prominent red scrollbar matching the Yohu theme */
+  border-radius: 9999px !important;
+  border: 1.5px solid rgba(15, 23, 42, 0.3) !important;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(220, 38, 38, 1) !important; /* Standout scrollbar on hover */
+}
+.custom-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(220, 38, 38, 0.75) rgba(15, 23, 42, 0.75) !important;
+}
+
+/* Hide scrollbars for slick navigation rails */
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+}
+
+/* ============================================================
+   MOBILE READABILITY & CONTAINER FLEXIBILITY FIX (v3)
+   Giải quyết triệt để 2 vấn đề:
+   1. Chữ to rõ trên mọi điện thoại/tablet (≤1023px) qua bộ chọn thuộc tính [class*="..."]
+   2. Giải phóng xung đột "ô có chữ cản trở": cho phép các ô/nút tự động giãn
+      chiều cao (height: auto) và tự xuống dòng (white-space: normal) thay vì
+      bị bóp nghẹt hay cắt cụt chữ.
+   ============================================================ */
+@media (max-width: 1023px) {
+  /* Tăng tỷ lệ phông nền cho toàn trang */
+  html {
+    font-size: 16px !important;
+  }
+
+  /* Phóng to toàn diện mọi cỡ chữ nhỏ đang dùng trong App.tsx */
+  [class*="text-[8px]"],
+  [class*="text-[9px]"],
+  [class*="text-[9.5px]"],
+  [class*="text-[10px]"],
+  [class*="text-[10.5px]"] {
+    font-size: 14.5px !important;
+    line-height: 1.5 !important;
+  }
+
+  [class*="text-[11px]"],
+  [class*="text-[11.5px]"],
+  [class*="text-xs"] {
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+  }
+
+  [class*="text-[12px]"],
+  [class*="text-[12.5px]"],
+  [class*="text-[13px]"],
+  [class*="text-[13.5px]"],
+  [class*="text-sm"] {
+    font-size: 16px !important;
+    line-height: 1.55 !important;
+  }
+
+  [class*="text-[14px]"],
+  [class*="text-[14.5px]"],
+  [class*="text-[15px]"],
+  [class*="text-[15.5px]"],
+  [class*="text-base"] {
+    font-size: 17px !important;
+    line-height: 1.55 !important;
+  }
+
+  /* Tiêu đề nổi bật như trang web thực thụ */
+  h1, [class*="text-lg"], [class*="text-xl"], [class*="text-2xl"] {
+    font-size: 20px !important;
+    line-height: 1.4 !important;
+  }
+
+  /* GIẢI QUYẾT XUNG ĐỘT CÁC Ô CHỨA CHỮ (CONTAINER CONFLICT FIX):
+     Khi chữ to ra, các ô (buttons, cards, grid cells) phải tự động nở chiều cao
+     và cho phép chữ xuống dòng tự nhiên, không bị cắt cụt hay đè lên nhau */
+  button, 
+  .grid > *, 
+  [role="button"],
+  [class*="rounded-xl"], 
+  [class*="rounded-2xl"] {
+    height: auto !important;
+    min-height: max-content;
+    white-space: normal !important;
+    word-break: break-word !important;
+  }
+
+  /* Các ô nhập liệu chuẩn Apple/Google, chống Auto-Zoom và dễ bấm ngón tay */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+    min-height: 46px !important;
+  }
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "Yohu AI Construction",
+  "description": "Nền tảng Saas AI tư vấn kiến trúc, phong thủy và dự toán chi phí xây dựng chuyên nghiệp của Yohu Việt Nam",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
