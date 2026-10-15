@@ -63,6 +63,8 @@ import PricingTableSection from "./components/PricingTableSection";
 import DesignTemplateGallery from "./components/DesignTemplateGallery";
 import PerspectiveImageUploader from "./components/PerspectiveImageUploader";
 import FloorPlan2DViewer from "./components/FloorPlan2DViewer";
+import PerspectiveStudio, { PerspectiveOptions } from "./components/PerspectiveStudio";
+import { computeSiteFor } from "./lib/siteGeometry";
 // 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
 const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
 import ElevationViewer from "./components/ElevationViewer";
@@ -609,6 +611,8 @@ export default function App() {
   const [exportCalculating, setExportCalculating] = useState<boolean>(false);
   const [imageRendering, setImageRendering] = useState<boolean>(false);
   const [renderedConceptImage, setRenderedConceptImage] = useState<string>("");
+  const [conceptError, setConceptError] = useState<string>("");
+  const [massingSnapshot, setMassingSnapshot] = useState<string>("");   // ảnh chụp 3D hình khối làm khung cho ảnh phối cảnh
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   
   const [aiLoading, setAiLoading] = useState<boolean>(false);
@@ -1555,22 +1559,32 @@ export default function App() {
   // Photo handlers converting uploads to Base64 strings
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const filesArray = Array.from(e.target.files) as File[];
-      filesArray.forEach((file) => {
+      const filesArray = (Array.from(e.target.files) as File[]).filter(f => f.type.startsWith('image/')).slice(0, 6);
+      // Thu nhỏ ảnh (cạnh dài ≤ 1280px, JPEG) để lưu được trên máy và gửi AI nhanh
+      const shrink = (file: File) => new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
-          if (reader.result) {
-            setConstructionInfo((prev) => {
-              const updated = {
-                ...prev,
-                referenceImages: [...prev.referenceImages, reader.result as string]
-              };
-              localStorage.setItem("yohu_construction_info", JSON.stringify(updated));
-              return updated;
-            });
-          }
+          const src = reader.result as string;
+          const img = new Image();
+          img.onload = () => {
+            const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+            const c = document.createElement('canvas');
+            c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+            c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+            resolve(c.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = () => resolve(src);
+          img.src = src;
         };
         reader.readAsDataURL(file);
+      });
+      filesArray.forEach(async (file) => {
+        const url = await shrink(file);
+        setConstructionInfo((prev) => {
+          const updated = { ...prev, referenceImages: [...(prev.referenceImages || []), url].slice(-6) };
+          try { localStorage.setItem("yohu_construction_info", JSON.stringify(updated)); } catch { /* bộ nhớ trình duyệt đầy: vẫn giữ ảnh trong phiên */ }
+          return updated;
+        });
       });
     }
   };
@@ -1911,39 +1925,53 @@ export default function App() {
   };
 
   // Triggers concept blueprint renderings (falls back to Unsplash samples gracefully)
-  const triggerRenderConceptImage = async (style: '2d' | '3d') => {
+  // Tóm tắt công trình gửi AI vẽ phối cảnh — lấy đúng số liệu khách đã nhập / xác nhận
+  const buildHouseBrief = () => {
+    const ct: any = constructionInfo || {};
+    const site = computeSiteFor(ct);
+    const sk = ct.rooms?.sketchLayout;
+    const skRooms = sk?.co_phac_thao !== false ? (sk?.tang || []).flatMap((t: any) => (t.phong || []).map((r: any) => `T${t.tang}: ${r.ten_goc || r.loai}`)) : [];
+    return [
+      `Loại công trình: ${ct.constructionType || 'Nhà ở'}`,
+      `Số tầng: ${ct.floors || 1}`,
+      `Kích thước nhà xây: rộng ${site.lotWidthM}m (mặt tiền), sâu ${site.houseLengthM}m; diện tích xây dựng ${site.footprint}m²`,
+      `Hướng mặt tiền: ${userInfo?.desiredDirection || 'chưa rõ'}`,
+      `Mái: ${ct.loai_mai || 'theo loại công trình'}`,
+      `Kết cấu: ${ct.loai_ket_cau_chinh || 'BTCT'}`,
+      ct.loai_tran ? `Trần: ${ct.loai_tran}` : '',
+      `Phòng ngủ: ${ct.rooms?.bedroomCount || 'theo thiết kế'}; WC: ${ct.rooms?.bathroomCount || 'theo thiết kế'}; phòng thờ: ${ct.rooms?.worshipRoom ? 'có' : 'không'}`,
+      skRooms.length ? `Bố trí theo phác thảo gia chủ: ${skRooms.join(', ')}` : '',
+      sk?.hien?.co ? 'Có hiên trước nhà' : '',
+      (sk?.ngoai_nha || []).length ? `Ngoài nhà: ${(sk.ngoai_nha || []).map((o: any) => o.loai).join(', ')}` : '',
+      ct.overallDescription ? `Mô tả của gia chủ: ${ct.overallDescription}` : ''
+    ].filter(Boolean).join('\n');
+  };
+
+  /** Ảnh phối cảnh: dùng khung 3D + ảnh tham chiếu gia chủ. Lỗi → báo lỗi, KHÔNG thay bằng ảnh mạng. */
+  const triggerRenderConceptImage = async (arg: '2d' | '3d' | PerspectiveOptions) => {
+    const o: PerspectiveOptions = typeof arg === 'string'
+      ? { view: 'exterior', style: 'Hiện đại', extra: '', useMassing: true, useReferences: true }
+      : arg;
     setImageRendering(true);
     setRenderedConceptImage("");
+    setConceptError("");
+    const toPart = (url: string) => { const m = String(url || '').match(/^data:(image\/[a-z+]+);base64,(.+)$/); return m ? { mimeType: m[1], data: m[2] } : null; };
     try {
-      const description = constructionInfo.overallDescription || `${constructionInfo.constructionType} ${constructionInfo.dimensions}, floors: ${constructionInfo.floors}`;
-      const packageString = goiKichHoat === 'design' ? 'Báo cáo + Bản vẽ' : goiKichHoat === 'standard' ? 'Báo cáo đầy đủ' : 'Báo cáo cơ bản';
+      const refs = o.useReferences ? (constructionInfo.referenceImages || []).slice(0, 3).map(toPart).filter(Boolean) : [];
+      const massing = o.useMassing && massingSnapshot ? toPart(massingSnapshot) : null;
       const res = await fetch("/api/generate-concept-image", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(isAdminAuthenticated ? { "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" } : {}) },
-        body: JSON.stringify({ prompt: description, optionType: style, lang, goi_mua: packageString, clientId })
+        body: JSON.stringify({ prompt: buildHouseBrief(), view: o.view, style: o.style, extra: o.extra, referenceImages: refs, massingImage: massing, lang, clientId })
       });
-      if (res.status === 403) {
-        const errData = await res.json();
-        alert(errData.error || (lang === 'vi' ? "Tính năng này chỉ áp dụng cho gói Thiết Kế 1.5M" : `This feature is only available for Design Tier (${formatCurrency(1500000, lang)})`));
-        setImageRendering(false);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.imageUrl) {
+        setConceptError(data.error || (lang === 'vi' ? `Chưa tạo được ảnh (mã lỗi ${res.status}). Vui lòng thử lại sau.` : `Image generation failed (${res.status}).`));
         return;
       }
-      if (!res.ok) throw new Error("Interactive Image Key required.");
-      const data = await res.json();
-      if (data.imageUrl) {
-        setRenderedConceptImage(data.imageUrl);
-      } else {
-        throw new Error("Failed to generate image");
-      }
+      setRenderedConceptImage(data.imageUrl);
     } catch (err: any) {
-      console.warn("Utilizing pre-rendered beautiful architectural vector schemas.", err);
-      const blueprints = style === '2d' 
-        ? "https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&q=80&w=800" 
-        : "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800";
-      
-      setTimeout(() => {
-        setRenderedConceptImage(blueprints);
-      }, 1500);
+      setConceptError(lang === 'vi' ? `Không kết nối được máy chủ tạo ảnh: ${err?.message || err}` : `Cannot reach image server: ${err?.message || err}`);
     } finally {
       setImageRendering(false);
     }
@@ -2321,7 +2349,7 @@ ${totalPages >= 2 ? `
 
     <!-- Section 2: Bảng BOQ Khối lượng vật tư chủ yếu -->
     <div class="section">
-      <div class="section-title">2. Bảng Bóc Tách Khối Lượng Vật Tư & Nhân Công (Khớp 100% Gói Đề Xuất)</div>
+      <div class="section-title">2. Bảng Bóc Tách Khối Lượng Vật Tư & Nhân Công (theo phương án & gói đã chọn)</div>
       <table class="styled-table" style="font-size: 7.5px; line-height: 1.25;">
         <thead>
           <tr>
@@ -2329,24 +2357,28 @@ ${totalPages >= 2 ? `
             <th>Hạng Mục Vật Tư / Nhân Công</th>
             <th style="width: 65px; text-align:right;">Khối Lượng</th>
             <th style="width: 35px; text-align:center;">ĐVT</th>
-            <th style="width: 85px; text-align:right;">Đơn Giá (đ)</th>
-            <th style="width: 105px; text-align:right;">Thành Tiền (VNĐ)</th>
+            <th style="width: 70px; text-align:right;">Đơn Giá (đ)</th>
+            <th style="width: 75px; text-align:right;">Vật Tư (đ)</th>
+            <th style="width: 70px; text-align:right;">Nhân Công (đ)</th>
+            <th style="width: 85px; text-align:right;">Thành Tiền (VNĐ)</th>
           </tr>
         </thead>
         <tbody>
           ${est.boqSummary.map((item, idx) => `
             <tr>
               <td style="text-align:center; font-weight:700;">${idx + 1}</td>
-              <td><b>${item.item}</b></td>
+              <td><b>${item.item}</b>${item.spec ? `<br/><span style="font-size:6.5px; color:#475569;">${item.spec}</span>` : ''}</td>
               <td style="text-align:right; font-weight:600;">${item.volume}</td>
               <td style="text-align:center; color:#64748b;">${item.unit}</td>
               <td style="text-align:right; color:#475569;">${item.unitPrice}</td>
+              <td style="text-align:right; color:#047857;">${item.material}</td>
+              <td style="text-align:right; color:#b45309;">${item.labor}</td>
               <td style="text-align:right; font-weight:700; color:#0f172a;">${item.totalAmount}</td>
             </tr>
           `).join('')}
           <tr style="background:#0f172a; color:#ffffff; font-weight:800;">
-            <td colspan="5" style="text-align:right; padding: 5px 8px; color:#f59e0b; font-size:8.5px;">TỔNG CỘNG GIÁ TRỊ CÔNG TRÌNH (CHÌA KHÓA TRAO TAY - GÓI ĐỀ XUẤT):</td>
-            <td style="text-align:right; padding: 5px 8px; color:#fde047; font-size:9.5px; font-weight:900;">${formatCurrency(est.packageOptions.pa3.totalCost, lang)}</td>
+            <td colspan="7" style="text-align:right; padding: 5px 8px; color:#f59e0b; font-size:8.5px;">TỔNG CỘNG (${est.selectedOption.title}):</td>
+            <td style="text-align:right; padding: 5px 8px; color:#fde047; font-size:9.5px; font-weight:900;">${formatCurrency(est.selectedOption.totalCost, lang)}</td>
           </tr>
         </tbody>
       </table>
@@ -4030,10 +4062,24 @@ ${totalPages >= 3 ? `
                               packageTier={goiKichHoat}
                               onUpgradePackage={(tier) => requestPackage(tier)}
                               link_anh_phoi_canh={activeCustomerLinkAnh}
+                              perspectiveSlot={
+                                <PerspectiveStudio
+                                  theme={theme}
+                                  referenceImages={constructionInfo.referenceImages || []}
+                                  massingSnapshot={massingSnapshot}
+                                  imageRendering={imageRendering}
+                                  renderedConceptImage={renderedConceptImage}
+                                  conceptError={conceptError}
+                                  onGenerate={(o) => triggerRenderConceptImage(o)}
+                                  onOpenMassing={() => { setActiveDrawingTab('massing'); setTimeout(() => document.getElementById('yohu-drawings')?.scrollIntoView({ behavior: 'smooth' }), 100); }}
+                                  setZoomImage={setZoomImage}
+                                  packageTier={goiKichHoat}
+                                />
+                              }
                             />
 
                           {goiKichHoat === 'design' ? (
-                            <div className="mt-6">
+                            <div className="mt-6" id="yohu-drawings">
                               {/* Sub-tabs for Technical Drawings */}
                               <div className="flex flex-wrap items-center gap-2.5 mb-3.5">
                                 <button
@@ -4082,6 +4128,7 @@ ${totalPages >= 3 ? `
                                     frontSetbackM={(constructionInfo as any).frontSetbackM}
                                     backSetbackM={(constructionInfo as any).backSetbackM}
                                     roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
+                                    onSnapshot={(url) => setMassingSnapshot(url)}
                                   />
                                 </React.Suspense>
                               ) : activeDrawingTab === 'floorplan' ? (
@@ -4098,6 +4145,7 @@ ${totalPages >= 3 ? `
                                   desiredDirection={userInfo?.desiredDirection}
                                   frontSetbackM={(constructionInfo as any).frontSetbackM}
                                   backSetbackM={(constructionInfo as any).backSetbackM}
+                                  onToggleAdvice={(apply) => setConstructionInfo((prev: any) => ({ ...prev, rooms: { ...(prev.rooms || {}), applyAdvice: apply } }))}
                                 />
                               ) : (
                                 <ElevationViewer 
