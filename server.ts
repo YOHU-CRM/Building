@@ -2065,42 +2065,61 @@ Yêu cầu:
 
 // Concept Rendering Generator - Integration using Gemini Image generation
 app.post("/api/generate-concept-image", async (req, res) => {
-  const { prompt, optionType = "3d", lang = "vi", loai_phong = "", clientId = "" } = req.body;
+  const { prompt = "", optionType = "3d", lang = "vi", loai_phong = "", clientId = "", view = "exterior", style = "", extra = "" } = req.body || {};
 
   // Gói lấy theo xác nhận của máy chủ — không tin giá trị goi_mua do trình duyệt gửi lên
   const verifiedGoi = isAdminRequest(req) ? "design" : await getVerifiedPackage(String(clientId || ""));
   if (verifiedGoi !== "design") {
     return res.status(403).json({
       error: lang === "vi"
-        ? "Tính năng này chỉ áp dụng cho gói Thiết Kế 1.5M"
-        : "This feature is only available for the 1.5M Design Package."
+        ? "Ảnh phối cảnh chỉ áp dụng cho gói Thiết Kế. Liên hệ admin để kích hoạt."
+        : "This feature is only available for the Design Package."
     });
   }
 
   if (FREE_KEYS.length + PAID_KEYS.length === 0) {
-    return res.status(500).json({ 
-      error: lang === "vi" 
-        ? "Tính năng dựng concept hình ảnh yêu cầu GEMINI_FREE_KEYS hoặc GEMINI_PAID_KEYS trong .env." 
-        : "Dynamic image concept rendering requires an active GEMINI_API_KEY."
+    return res.status(500).json({
+      error: lang === "vi"
+        ? "Máy chủ chưa có khóa AI tạo ảnh (biến GEMINI_PAID_KEYS hoặc GEMINI_FREE_KEYS trên Vercel)."
+        : "Image generation requires a Gemini API key on the server."
     });
   }
 
-  try {
-    const constructPrompt = `
-      Generate a professional high-contrast architectural render concept for a room of type: ${loai_phong || "general interior"}.
-      Type: ${optionType === "2d" ? "Architectural AutoCAD style clean white blueprint line art sketch" : "Photorealistic ultra-modern architectural interior concept rendering, warm cinematic sunshine, beautiful landscape landscaping"}
-      Context details: ${prompt}
-      Make it beautifully proportioned, premium design quality.
-    `;
+  // Ảnh gửi kèm: khung 3D hình khối + tối đa 3 ảnh tham chiếu của gia chủ (chỉ nhận ảnh png/jpeg/webp ≤ 3MB)
+  const okImg = (x: any) => x && typeof x.data === "string" && /^image\/(png|jpeg|webp)$/.test(String(x.mimeType)) && x.data.length < 4_000_000;
+  const massing = okImg(req.body?.massingImage) ? req.body.massingImage : null;
+  const refs = (Array.isArray(req.body?.referenceImages) ? req.body.referenceImages : []).filter(okImg).slice(0, 3);
 
+  const parts: any[] = [];
+  if (massing) {
+    parts.push({ text: "ẢNH 1 — KHUNG HÌNH KHỐI 3D của ngôi nhà (dựng từ mặt bằng thật). BẮT BUỘC giữ đúng: số tầng, tỷ lệ chiều cao/chiều rộng, hình dáng và độ dốc mái, vị trí cửa chính, cửa sổ, ban công, hiên, góc nhìn camera." });
+    parts.push({ inlineData: { mimeType: massing.mimeType, data: massing.data } });
+  }
+  refs.forEach((r: any, k: number) => {
+    parts.push({ text: `ẢNH THAM CHIẾU ${k + 1} CỦA GIA CHỦ — lấy theo phong cách, vật liệu, màu sắc, chi tiết mặt tiền. KHÔNG sao chép hình khối của ảnh này nếu khác khung 3D.` });
+    parts.push({ inlineData: { mimeType: r.mimeType, data: r.data } });
+  });
+  const isInterior = view === "interior";
+  void optionType;
+  const constructPrompt = `
+Bạn là kiến trúc sư diễn họa. Vẽ 1 ảnh phối cảnh ${isInterior ? `NỘI THẤT ${loai_phong || "phòng khách"}` : "NGOẠI THẤT mặt tiền"} chân thực (photorealistic) cho đúng ngôi nhà dưới đây tại Việt Nam.
+THÔNG TIN CÔNG TRÌNH (do gia chủ nhập/xác nhận — phải tuân theo):
+${String(prompt).slice(0, 2500)}
+PHONG CÁCH: ${style || "theo mô tả của gia chủ"}${refs.length ? " — bám sát các ảnh tham chiếu của gia chủ" : ""}.
+${extra ? `YÊU CẦU THÊM CỦA GIA CHỦ: ${String(extra).slice(0, 500)}` : ""}
+QUY TẮC:
+- ${massing ? "Giữ đúng hình khối, số tầng, mái và vị trí cửa như ẢNH 1; chỉ thay vật liệu, màu, chi tiết, cảnh quan." : "Đúng số tầng, loại mái, kích thước mặt tiền ghi ở trên."}
+- Không thêm tầng, không đổi loại mái, không tự thêm hồ bơi / gara nếu gia chủ không có.
+- Bối cảnh Việt Nam: ánh sáng ban ngày tự nhiên, cây xanh vừa phải, không chữ, không logo, không watermark.`;
+  parts.push({ text: constructPrompt });
+
+  try {
     const response = await callGeminiWithRetry(
       (ai, model) =>
         ai.models.generateContent({
           model,
-          contents: { parts: [{ text: constructPrompt }] },
-          config: {
-            imageConfig: { aspectRatio: "16:9", imageSize: "1K" }
-          }
+          contents: { parts },
+          config: { imageConfig: { aspectRatio: "16:9", imageSize: "1K" } }
         }),
       ["gemini-3.1-flash-image", "gemini-3.1-flash-lite-image"]
     );
@@ -2108,22 +2127,20 @@ app.post("/api/generate-concept-image", async (req, res) => {
     let imageUrl = "";
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.inlineData) {
-        imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+        imageUrl = `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
         break;
       }
     }
-
-    if (!imageUrl) {
-      throw new Error("No image data returned from generator.");
-    }
-
-    res.json({ imageUrl });
+    if (!imageUrl) throw new Error("AI không trả về ảnh");
+    res.json({ imageUrl, used: { massing: !!massing, references: refs.length } });
   } catch (error: any) {
-    console.warn("Concept Image Gen Notice:", error?.message || error);
-    res.status(429).json({ 
+    const msg = String(error?.message || error);
+    console.warn("Concept Image Gen Notice:", msg);
+    const quota = /quota|429|exhaust|rate/i.test(msg);
+    res.status(quota ? 429 : 502).json({
       error: lang === "vi"
-        ? "Hạn ngạch (Quota) tạo ảnh AI hiện đang bận hoặc cần gói trả phí (Pay-as-you-go). Vui lòng thử lại sau vài phút hoặc nhập thêm GEMINI_PAID_KEY."
-        : "Image generation quota is currently rate-limited. Please retry shortly or provide a paid Gemini API key."
+        ? (quota ? "Hết lượt tạo ảnh AI của khóa hiện tại. Thử lại sau vài phút hoặc thêm khóa trả phí GEMINI_PAID_KEYS trên Vercel." : `AI chưa tạo được ảnh: ${msg.slice(0, 160)}`)
+        : (quota ? "Image quota exceeded, retry later or add a paid key." : `Image generation failed: ${msg.slice(0, 160)}`)
     });
   }
 });
