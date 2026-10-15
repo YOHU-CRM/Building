@@ -63,6 +63,8 @@ import PricingTableSection from "./components/PricingTableSection";
 import DesignTemplateGallery from "./components/DesignTemplateGallery";
 import PerspectiveImageUploader from "./components/PerspectiveImageUploader";
 import FloorPlan2DViewer from "./components/FloorPlan2DViewer";
+// 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
+const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
 import ElevationViewer from "./components/ElevationViewer";
 import { ProjectIntakeUploader } from "./components/ProjectIntakeUploader";
 import { SpecificationReportModal } from "./components/SpecificationReportModal";
@@ -180,7 +182,7 @@ export default function App() {
   const [adminVideoSearch, setAdminVideoSearch] = useState<string>("");
   const [floorPlanSvgUrl, setFloorPlanSvgUrl] = useState<string | null>(null);
   const [elevationSvgUrl, setElevationSvgUrl] = useState<string | null>(null);
-  const [activeDrawingTab, setActiveDrawingTab] = useState<'floorplan' | 'elevation'>('floorplan');
+  const [activeDrawingTab, setActiveDrawingTab] = useState<'floorplan' | 'elevation' | 'massing'>('floorplan');
   const [showCTVDashboard, setShowCTVDashboard] = useState<boolean>(false);
   const [dynamicGasUrl, setDynamicGasUrl] = useState<string>("");
 
@@ -4054,9 +4056,35 @@ ${totalPages >= 3 ? `
                                 >
                                   🏛️ Mặt Cắt Đứng (Elevation)
                                 </button>
+                                <button
+                                  onClick={() => setActiveDrawingTab('massing')}
+                                  className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer flex items-center gap-1.5 min-h-[44px] ${
+                                    activeDrawingTab === 'massing'
+                                      ? 'bg-emerald-600 text-white font-black shadow-md'
+                                      : theme === 'dark' ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  🧊 3D Hình Khối
+                                </button>
                               </div>
 
-                              {activeDrawingTab === 'floorplan' ? (
+                              {activeDrawingTab === 'massing' ? (
+                                <React.Suspense fallback={<div className="mt-6 p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
+                                  <Massing3DViewer
+                                    dimensions={constructionInfo.dimensions}
+                                    floors={parseInt(constructionInfo.floors) || 2}
+                                    rooms={constructionInfo.rooms}
+                                    theme={theme}
+                                    lang={lang}
+                                    customerName={userInfo?.name || "Khách Hàng"}
+                                    fengShuiAnalysis={fengShuiAnalysis}
+                                    desiredDirection={userInfo?.desiredDirection}
+                                    frontSetbackM={(constructionInfo as any).frontSetbackM}
+                                    backSetbackM={(constructionInfo as any).backSetbackM}
+                                    roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
+                                  />
+                                </React.Suspense>
+                              ) : activeDrawingTab === 'floorplan' ? (
                                 <FloorPlan2DViewer 
                                   dimensions={constructionInfo.dimensions}
                                   floors={parseInt(constructionInfo.floors) || 2}
