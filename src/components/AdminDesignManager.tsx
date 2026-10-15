@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { addDesignSample, getDesignSamples, DesignSample } from '../lib/designSamples';
+import { addDesignSample, getDesignSamples, updateDesignSample, deleteDesignSample, isDefaultSample, DesignSample } from '../lib/designSamples';
 
 /**
  * ADMIN — QUẢN LÝ MẪU THIẾT KẾ: tải ảnh trực tiếp (hoặc dán link ảnh / Google Drive), dán link YouTube (xem trước),
@@ -25,6 +25,7 @@ export const AdminDesignManager: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [list, setList] = useState<DesignSample[]>([]);
+  const [editId, setEditId] = useState<string>('');
   const reload = () => { getDesignSamples().then(d => setList(d as DesignSample[])).catch(() => {}); };
   useEffect(() => { reload(); }, []);
 
@@ -54,15 +55,28 @@ export const AdminDesignManager: React.FC = () => {
     setLoading(true); setMsg('');
     try {
       const id = ytId(sample.videoUrl);
-      await addDesignSample({ ...sample, imageUrl: driveToImage(sample.imageUrl), constructionType: sample.roomType || sample.constructionType, ...(id ? { youtubeId: id } as any : {}) });
-      setMsg('✓ Đã thêm mẫu — khách thấy ngay ở mục Mẫu thiết kế.');
-      setSample(empty);
+      const data = { ...sample, imageUrl: driveToImage(sample.imageUrl), constructionType: sample.roomType || sample.constructionType, youtubeId: id || '' } as any;
+      delete data.id;
+      if (editId) { await updateDesignSample(editId, data); setMsg('✓ Đã lưu thay đổi mẫu.'); }
+      else { await addDesignSample(data); setMsg('✓ Đã thêm mẫu — khách thấy ngay ở mục Mẫu thiết kế.'); }
+      setSample(empty); setEditId('');
       reload();
     } catch (err: any) {
       setMsg(`❌ Chưa lưu được: ${err?.message || err}`);
     } finally { setLoading(false); }
   };
 
+  const startEdit = (m: any) => {
+    setEditId(m.id);
+    setSample({ ...empty, ...m, videoUrl: m.videoUrl || (m.youtubeId ? `https://youtu.be/${m.youtubeId}` : '') });
+    setMsg(`Đang sửa mẫu "${m.name}" — sửa xong bấm Lưu thay đổi.`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const remove = async (m: any) => {
+    if (!window.confirm(`XÓA mẫu "${m.name}"? Khách sẽ không thấy mẫu này nữa. (Máy chủ giữ 1 bản sao lưu để khôi phục nếu cần.)`)) return;
+    try { await deleteDesignSample(m.id); setMsg(`✓ Đã xóa mẫu "${m.name}".`); if (editId === m.id) { setEditId(''); setSample(empty); } reload(); }
+    catch (err: any) { setMsg(`❌ Chưa xóa được: ${err?.message || err}`); }
+  };
   const inp = 'w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-100 text-sm';
   const id = ytId(sample.videoUrl);
   return (
@@ -90,7 +104,10 @@ export const AdminDesignManager: React.FC = () => {
             {sample.videoUrl && <div className={`text-xs mt-1 ${id ? 'text-emerald-400' : 'text-rose-400'}`}>{id ? `✓ Nhận được video ${id}` : '❌ Link YouTube không đúng'}</div>}
           </div>
           <input className={inp} placeholder="Ghi chú / mô tả ngắn (hiện cho khách)" value={sample.prompt} onChange={e => set({ prompt: e.target.value })} />
-          <button type="submit" disabled={loading} className="px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-sm cursor-pointer disabled:opacity-60">{loading ? 'Đang lưu…' : '＋ Thêm mẫu'}</button>
+          <div className="flex gap-2">
+            <button type="submit" disabled={loading} className="px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-sm cursor-pointer disabled:opacity-60">{loading ? 'Đang lưu…' : editId ? '💾 Lưu thay đổi' : '＋ Thêm mẫu'}</button>
+            {editId && <button type="button" onClick={() => { setEditId(''); setSample(empty); setMsg(''); }} className="px-4 py-2.5 rounded-xl bg-slate-700 text-white font-bold text-sm cursor-pointer">Hủy sửa</button>}
+          </div>
           {msg && <div className="text-xs">{msg}</div>}
         </div>
         <div className="space-y-2">
@@ -105,7 +122,14 @@ export const AdminDesignManager: React.FC = () => {
           {list.map((m: any) => (
             <div key={m.id} className="rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
               <img src={m.imageUrl} alt={m.name} className="w-full aspect-[4/3] object-cover" />
-              <div className="p-1.5 text-[11px]"><b>{m.name}</b><div className="text-slate-400">{m.roomType || m.constructionType} · {m.style}{(m.youtubeId || m.videoUrl) ? ' · ▶ YouTube' : ''}</div></div>
+              <div className="p-1.5 text-[11px]"><b>{m.name}</b><div className="text-slate-400">{m.roomType || m.constructionType} · {m.style}{(m.youtubeId || m.videoUrl) ? ' · ▶ YouTube' : ''}</div>
+                {isDefaultSample(m.id) ? <div className="text-slate-500 mt-1">Mẫu mặc định (ẩn khi có mẫu thật)</div> : (
+                  <div className="flex gap-1.5 mt-1">
+                    <button onClick={() => startEdit(m)} className="px-2 py-1 rounded bg-sky-700 text-white cursor-pointer">✏️ Sửa</button>
+                    <button onClick={() => remove(m)} className="px-2 py-1 rounded bg-rose-700 text-white cursor-pointer">🗑 Xóa</button>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>

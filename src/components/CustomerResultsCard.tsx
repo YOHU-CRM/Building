@@ -4,20 +4,22 @@ import React from 'react';
  * KẾT QUẢ THIẾT KẾ CỦA KHÁCH (gói Thiết kế) — đặt ở ĐẦU phần báo cáo để khách trả phí thấy ngay, không phải đi tìm:
  * ảnh phối cảnh đã tạo, nút mở 3D hình khối, mặt bằng, video (khi admin đã gắn link).
  */
-export interface PerspectiveShot { url: string; style: string; view: string; at: string }
+export interface PerspectiveShot { url: string; style: string; view: string; at: string; label?: string }
 
 interface Props {
   theme: string;
   customerName?: string;
   shots: PerspectiveShot[];
   videoUrl?: string;
+  /** video quay vòng 3D vừa quay trên máy (chưa lưu máy chủ) */
+  localVideo?: { url: string; ext: string } | null;
   onOpen3D: () => void;
   onOpenPlan: () => void;
   onOpenStudio: () => void;
   setZoomImage: (url: string) => void;
 }
 
-export default function CustomerResultsCard({ theme, customerName, shots, videoUrl, onOpen3D, onOpenPlan, onOpenStudio, setZoomImage }: Props) {
+export default function CustomerResultsCard({ theme, customerName, shots, videoUrl, localVideo, onOpen3D, onOpenPlan, onOpenStudio, setZoomImage }: Props) {
   const dark = theme === 'dark';
   const btn = 'px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-black cursor-pointer min-h-[44px]';
   return (
@@ -31,20 +33,21 @@ export default function CustomerResultsCard({ theme, customerName, shots, videoU
           <button onClick={onOpen3D} className={`${btn} bg-emerald-600 text-white`}>🧊 Xem 3D nhà của tôi</button>
           <button onClick={onOpenPlan} className={`${btn} ${dark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>📐 Mặt bằng</button>
           {videoUrl && <a href={videoUrl} target="_blank" rel="noreferrer" className={`${btn} bg-purple-600 text-white`}>🎬 Xem video</a>}
+          {localVideo && <a href={localVideo.url} download={`Video_3D_${String(customerName || 'nha').replace(/\s+/g, '_')}.${localVideo.ext}`} className={`${btn} bg-fuchsia-600 text-white`}>⬇ Video 3D vừa quay</a>}
         </div>
       </div>
       {shots.length ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          {shots.slice(0, 6).map((s, i) => (
+          {shots.slice(0, 9).map((s, i) => (
             <figure key={i} className="relative rounded-xl overflow-hidden border border-slate-500/30 cursor-zoom-in" onClick={() => setZoomImage(s.url)}>
               <img src={s.url} alt={`Phối cảnh ${i + 1}`} className="w-full aspect-[16/9] object-cover" />
-              <figcaption className="absolute bottom-0 inset-x-0 px-2 py-1 bg-black/55 text-white text-[10px] sm:text-[11px]">{s.view === 'interior' ? 'Nội thất' : 'Ngoại thất'} · {s.style}</figcaption>
+              <figcaption className="absolute bottom-0 inset-x-0 px-2 py-1 bg-black/55 text-white text-[10px] sm:text-[11px]">{s.label || (s.view === 'interior' ? 'Nội thất' : 'Ngoại thất')} · {s.style}</figcaption>
             </figure>
           ))}
         </div>
       ) : (
         <div className={`p-4 rounded-xl border border-dashed text-xs sm:text-sm ${dark ? 'border-slate-700 text-slate-400' : 'border-slate-300 text-slate-600'}`}>
-          Chưa có ảnh phối cảnh. <button onClick={onOpenStudio} className="underline font-bold text-amber-500 cursor-pointer">Tạo ảnh phối cảnh từ 3D nhà của anh/chị</button>.
+          Chưa có ảnh phối cảnh. <button onClick={onOpenStudio} className="underline font-bold text-amber-500 cursor-pointer">Tạo bộ ảnh phối cảnh từ 3D nhà của anh/chị</button>. Muốn có video: mở 🧊 3D → bấm <b>🎬 Quay video 3D</b>.
         </div>
       )}
     </div>

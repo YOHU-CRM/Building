@@ -21,6 +21,39 @@ interface Props {
   customerName?: string;
   /** ảnh chụp 3D (PNG data URL) — dùng cho bước ảnh phối cảnh */
   onSnapshot?: (dataUrl: string) => void;
+  /** Chốt hình khối: chụp 5 góc cố định (cùng kích thước 16:9, không chữ) làm khung cho bộ ảnh phối cảnh */
+  onLockMassing?: (shots: MassingShot[]) => void;
+  lockedAt?: string;
+  /** video quay vòng 3D đã quay xong (blob URL) */
+  onVideoReady?: (url: string, ext: string) => void;
+  /** bản xem thử (khách chưa mua gói Thiết kế): chỉ xoay xem, không tải / quay / chốt */
+  preview?: boolean;
+}
+
+export interface MassingShot { key: string; label: string; url: string }
+
+type Ctx = { renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls; groups: THREE.Object3D[]; labelGroup: THREE.Group; target: THREE.Vector3; dist: number; driver?: (now: number) => void };
+
+/** 5 góc chụp cố định — dùng chung cho "Chốt hình khối" và bộ ảnh phối cảnh */
+export const SHOT_PRESETS: { key: string; label: string; pos: (t: THREE.Vector3, d: number) => [number, number, number]; look?: (t: THREE.Vector3) => [number, number, number] }[] = [
+  { key: 'corner_l', label: 'Góc chéo trái', pos: (t, d) => [t.x - d * 0.62, d * 0.36, t.z + d * 0.78] },
+  { key: 'front', label: 'Mặt tiền', pos: (t, d) => [t.x, 1.7 + d * 0.1, t.z + d * 1.05], look: t => [t.x, t.y * 1.15, t.z] },
+  { key: 'corner_r', label: 'Góc chéo phải', pos: (t, d) => [t.x + d * 0.62, d * 0.36, t.z + d * 0.78] },
+  { key: 'rear', label: 'Phía sau / sân vườn', pos: (t, d) => [t.x + d * 0.45, d * 0.34, t.z - d * 0.95] },
+  { key: 'aerial', label: 'Toàn cảnh trên cao', pos: (t, d) => [t.x - d * 0.45, d * 0.95, t.z + d * 0.55] }
+];
+
+/** Ẩn/hiện tầng, mái, nhãn. labels: normal = như khi xem; none = không chữ (ảnh cho AI, video); rooms = chỉ tên phòng của tầng v */
+function applyView(c: Ctx, v: number, labels: 'normal' | 'none' | 'rooms') {
+  c.groups.forEach(g => {
+    const f = g.userData.floor as number;
+    g.visible = v === 0 ? true : f <= v;
+    g.children.forEach(o => { if (o.userData.tag === 'roof') o.visible = v === 0; });
+  });
+  c.labelGroup.children.forEach(sp => {
+    const u = sp.userData as any;
+    sp.visible = labels === 'none' ? false : labels === 'rooms' ? (!!u.roomLabel && u.floor === v) : (u.roomLabel ? (v !== 0 && u.floor === v) : (v === 0 || u.floor === 0));
+  });
 }
 
 const MAT_COLOR: Record<string, { c: string; o?: number; r?: number; m?: number }> = {
@@ -81,9 +114,9 @@ function gableGeometry(p: Extract<Prim, { t: 'gable' }>) {
   return g;
 }
 
-export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, lang = 'vi', fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, customerName, onSnapshot }: Props) {
+export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, lang = 'vi', fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, customerName, onSnapshot, onLockMassing, lockedAt, onVideoReady, preview }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const ctxRef = useRef<{ renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls; groups: THREE.Object3D[]; target: THREE.Vector3; dist: number } | null>(null);
+  const ctxRef = useRef<Ctx | null>(null);
   const [view, setView] = useState<number>(0);          // 0 = toàn nhà, k = xem tầng k (bóc mái & các tầng trên)
   const [autoRotate, setAutoRotate] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -199,7 +232,7 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
       }
     });
 
-    ctxRef.current = { renderer, scene, camera, controls, groups, target, dist };
+    ctxRef.current = { renderer, scene, camera, controls, groups, labelGroup, target, dist };
 
     const ro = new ResizeObserver(() => {
       const W = wrap.clientWidth, H = wrap.clientHeight;
@@ -208,7 +241,13 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
     });
     ro.observe(wrap);
     let raf = 0;
-    const loop = () => { raf = requestAnimationFrame(loop); if (document.hidden) return; controls.update(); renderer.render(scene, camera); };
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const drv = ctxRef.current?.driver;
+      if (drv) { drv(performance.now()); return; }      // đang quay video: kịch bản camera tự điều khiển
+      if (document.hidden) return;
+      controls.update(); renderer.render(scene, camera);
+    };
     loop();
 
     return () => {
@@ -225,19 +264,7 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
   /* xem từng tầng: ẩn mái & các tầng trên, hiện tên phòng của tầng đang xem */
   useEffect(() => {
     const c = ctxRef.current; if (!c || !model) return;
-    c.groups.forEach(g => {
-      const f = g.userData.floor as number;
-      g.visible = view === 0 ? true : f <= view;
-      g.children.forEach(o => { if (o.userData.tag === 'roof') o.visible = view === 0; });   // bóc cả mái hiên khi xem trong nhà
-    });
-    // tầng đang xem: ẩn sàn của tầng trên (thuộc nhóm tầng trên) – đã ẩn theo nhóm
-    c.scene.children.forEach(ch => {
-      if (!(ch instanceof THREE.Group) || ch.userData.floor !== undefined) return;
-      ch.children.forEach(s => {
-        const u = s.userData as any;
-        s.visible = u.roomLabel ? (view !== 0 && u.floor === view) : (view === 0 || u.floor === 0);
-      });
-    });
+    applyView(c, view, 'normal');      // bóc mái & các tầng trên khi xem trong nhà
   }, [view, model]);
 
   useEffect(() => { const c = ctxRef.current; if (c) { c.controls.autoRotate = autoRotate; c.controls.autoRotateSpeed = 1.2; } }, [autoRotate, model]);
@@ -266,6 +293,121 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
     a.href = url; a.download = `3D_hinh_khoi_${String(customerName || 'nha').replace(/\s+/g, '_')}.png`; a.click();
   };
 
+  /** đổi tạm khung vẽ sang 1280×720 (16:9) để mọi ảnh/khung hình cùng kích thước; trả hàm khôi phục */
+  const captureSize = (c: Ctx) => {
+    const W = 1280, H = 720;
+    const size = c.renderer.getSize(new THREE.Vector2()), pr = c.renderer.getPixelRatio();
+    const pos = c.camera.position.clone();
+    c.renderer.setPixelRatio(1); c.renderer.setSize(W, H, false); c.camera.aspect = W / H; c.camera.updateProjectionMatrix();
+    return () => {
+      c.renderer.setPixelRatio(pr); c.renderer.setSize(size.x, size.y, false); c.camera.aspect = size.x / size.y; c.camera.updateProjectionMatrix();
+      c.camera.position.copy(pos); c.controls.update(); applyView(c, viewRef.current, 'normal');
+    };
+  };
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
+
+  const [lockMsg, setLockMsg] = useState('');
+  /** CHỐT HÌNH KHỐI: chụp 5 góc cố định, không chữ, gửi sang bước ảnh phối cảnh */
+  const lockMassing = () => {
+    const c = ctxRef.current; if (!c || !onLockMassing) return;
+    applyView(c, 0, 'none');
+    const restore = captureSize(c);
+    const shots: MassingShot[] = SHOT_PRESETS.map(p => {
+      c.camera.position.set(...p.pos(c.target, c.dist));
+      c.camera.lookAt(...(p.look ? p.look(c.target) : [c.target.x, c.target.y, c.target.z] as [number, number, number]));
+      c.renderer.render(c.scene, c.camera);
+      return { key: p.key, label: p.label, url: c.renderer.domElement.toDataURL('image/jpeg', 0.88) };
+    });
+    restore();
+    onLockMassing(shots);
+    setLockMsg('✓ Đã chốt hình khối — 5 góc đã gửi sang "Ảnh phối cảnh"');
+    setTimeout(() => setLockMsg(''), 4000);
+  };
+
+  /** VIDEO QUAY VÒNG 3D — quay ngay trên máy khách (MediaRecorder), không gọi API, không tốn tín dụng */
+  const [rec, setRec] = useState<number | null>(null);
+  const [video, setVideo] = useState<{ url: string; ext: string } | null>(null);
+  const recordVideo = () => {
+    const c = ctxRef.current; if (!c || !model || rec !== null) return;
+    if (typeof MediaRecorder === 'undefined' || !(HTMLCanvasElement.prototype as any).captureStream) {
+      alert('Trình duyệt này chưa hỗ trợ quay video. Hãy dùng Chrome (Android / máy tính) hoặc Safari iOS 14.5 trở lên.');
+      return;
+    }
+    const W = 1280, H = 720;
+    const out = document.createElement('canvas'); out.width = W; out.height = H;
+    const g = out.getContext('2d')!;
+    const stream = (out as any).captureStream(30) as MediaStream;
+    const types = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    const mime = types.find(t => (MediaRecorder as any).isTypeSupported?.(t)) || '';
+    let mr: MediaRecorder;
+    try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000 } : undefined); }
+    catch { alert('Không khởi động được bộ quay video trên thiết bị này.'); return; }
+    const chunks: Blob[] = [];
+    mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const ext = (mr.mimeType || mime || 'video/webm').includes('mp4') ? 'mp4' : 'webm';
+    mr.onstop = () => {
+      const blob = new Blob(chunks, { type: mr.mimeType || mime || 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      setVideo(old => { if (old) URL.revokeObjectURL(old.url); return { url, ext }; });
+      onVideoReady?.(url, ext);
+      setRec(null);
+    };
+    const segs: { dur: number; kind: 'orbit' | 'floor' | 'end'; f?: number }[] = [
+      { dur: 12000, kind: 'orbit' },
+      ...Array.from({ length: model.floors }, (_, i) => ({ dur: 3500, kind: 'floor' as const, f: i + 1 })),
+      { dur: 2500, kind: 'end' }
+    ];
+    const total = segs.reduce((a, b) => a + b.dur, 0);
+    const restore = captureSize(c);
+    c.controls.enabled = false;
+    const name = String(customerName || '').trim();
+    const t0 = performance.now();
+    let lastP = -1;
+    const box = (x: number, y: number, txt: string, font: string, bg = 'rgba(15,23,42,0.68)') => {
+      g.font = font; const w = g.measureText(txt).width + 28;
+      g.fillStyle = bg; g.fillRect(x, y, w, 46); g.fillStyle = '#ffffff'; g.textBaseline = 'middle'; g.fillText(txt, x + 14, y + 24);
+    };
+    const finish = () => { c.driver = undefined; c.controls.enabled = true; restore(); try { mr.stop(); } catch { setRec(null); } };
+    c.driver = (now: number) => {
+      const t = now - t0;
+      if (t >= total) { finish(); return; }
+      let acc = 0, seg = segs[0];
+      for (const sg of segs) { if (t < acc + sg.dur) { seg = sg; break; } acc += sg.dur; }
+      const k = (t - acc) / seg.dur, T = c.target, d = c.dist;
+      let caption = '';
+      if (seg.kind === 'orbit') {
+        applyView(c, 0, 'none');
+        const a = -Math.PI * 0.3 + k * Math.PI * 2, rr = d * 0.95;
+        c.camera.position.set(T.x + Math.sin(a) * rr, d * (0.3 + 0.12 * Math.sin(k * Math.PI)), T.z + Math.cos(a) * rr);
+        c.camera.lookAt(T);
+        caption = 'Toàn cảnh ngôi nhà';
+      } else if (seg.kind === 'floor') {
+        applyView(c, seg.f!, 'rooms');
+        const a = -0.5 + k * 0.4;
+        c.camera.position.set(T.x + Math.sin(a) * d * 0.38, model.floorBase[seg.f!] + d * 1.2, T.z + Math.cos(a) * d * 0.38);
+        c.camera.lookAt(T.x, model.floorBase[seg.f!], T.z);
+        caption = `Mặt bằng tầng ${seg.f}`;
+      } else {
+        applyView(c, 0, 'none');
+        c.camera.position.set(T.x - d * 0.62 + k * d * 0.15, d * 0.36, T.z + d * 0.78);
+        c.camera.lookAt(T);
+        caption = 'Yohu ConsTech — thiết kế theo yêu cầu gia chủ';
+      }
+      c.renderer.render(c.scene, c.camera);
+      g.drawImage(c.renderer.domElement, 0, 0, W, H);
+      if (name) box(24, 24, `Nhà ${name}`, 'bold 26px Arial, sans-serif');
+      box(24, H - 70, caption, 'bold 22px Arial, sans-serif');
+      g.font = '16px Arial, sans-serif'; g.fillStyle = 'rgba(255,255,255,0.85)'; g.textBaseline = 'alphabetic';
+      const wm = 'Mô hình hình khối · Yohu ConsTech'; g.fillText(wm, W - g.measureText(wm).width - 20, H - 20);
+      const p = Math.floor((t / total) * 100);
+      if (p !== lastP && p % 5 === 0) { lastP = p; setRec(p); }
+    };
+    mr.start(500);
+    setRec(0);
+  };
+  useEffect(() => () => { const c = ctxRef.current; if (c) c.driver = undefined; }, []);
+
   const dark = theme === 'dark';
   const btn = (active: boolean) => `px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer min-h-[40px] ${active ? 'bg-amber-500 text-slate-950 font-black shadow' : dark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`;
 
@@ -276,10 +418,12 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
           <h4 className="text-sm sm:text-base font-black uppercase tracking-tight">🧊 {lang === 'vi' ? '3D Hình Khối — dựng từ mặt bằng' : '3D Massing Model'}</h4>
           <p className="text-xs text-slate-400">{model ? model.summary.join(' · ') : ''}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {onSnapshot && <button onClick={useForPerspective} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{sent ? '✓ Đã gửi sang Ảnh phối cảnh' : '🎨 Dùng làm khung ảnh phối cảnh'}</button>}
+        {!preview && <div className="flex flex-wrap gap-2">
+          {onLockMassing && <button onClick={lockMassing} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{lockMsg ? '✓ Đã chốt' : lockedAt ? '🔒 Chốt lại hình khối' : '✅ Chốt hình khối (5 góc)'}</button>}
+          <button onClick={recordVideo} disabled={rec !== null} className="px-4 py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer disabled:opacity-70">{rec !== null ? `⏺ Đang quay ${rec}%…` : '🎬 Quay video 3D'}</button>
+          {onSnapshot && !onLockMassing && <button onClick={useForPerspective} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{sent ? '✓ Đã gửi sang Ảnh phối cảnh' : '🎨 Dùng làm khung ảnh phối cảnh'}</button>}
           <button onClick={snapshot} className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">📸 {lang === 'vi' ? 'Tải ảnh 3D (PNG)' : 'Download PNG'}</button>
-        </div>
+        </div>}
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
@@ -296,10 +440,22 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
 
       <div ref={wrapRef} className={`relative w-full h-[420px] sm:h-[540px] rounded-xl overflow-hidden border ${dark ? 'border-slate-800' : 'border-slate-200'}`}>
         {err && <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-amber-500">{err}</div>}
+        {preview && <div className="absolute top-2 right-2 px-3 py-1.5 rounded-lg bg-purple-700/90 text-white text-[11px] font-black pointer-events-none">BẢN XEM THỬ</div>}
+        {rec !== null && <div className="absolute top-2 left-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-black pointer-events-none animate-pulse">⏺ Đang quay video — giữ màn hình mở ({rec}%)</div>}
         <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-md bg-slate-950/80 text-[10px] sm:text-[11px] text-slate-200 pointer-events-none">
           Kéo 1 ngón: xoay · chụm 2 ngón: phóng to · kéo 2 ngón: di chuyển
         </div>
       </div>
+      {(lockMsg || lockedAt) && !preview && <div className="mt-2 text-xs font-bold text-emerald-500">{lockMsg || `🔒 Hình khối đã chốt lúc ${new Date(lockedAt!).toLocaleString('vi-VN')}. Sửa mặt bằng xong thì bấm "Chốt lại hình khối".`}</div>}
+      {video && !preview && (
+        <div className="mt-3 p-3 rounded-xl border border-purple-500/40 bg-purple-500/5">
+          <div className="text-xs font-black mb-2">🎬 Video 3D vừa quay ({video.ext.toUpperCase()}, ~{Math.round((12 + 3.5 * (model?.floors || 1) + 2.5))} giây)</div>
+          <video src={video.url} controls playsInline className="w-full max-h-[360px] rounded-lg bg-black" />
+          <a href={video.url} download={`Video_3D_${String(customerName || 'nha').replace(/\s+/g, '_')}.${video.ext}`} className="inline-block mt-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-black">⬇ Tải video về máy</a>
+          {video.ext === 'webm' && <span className="ml-2 text-[11px] text-slate-400">File .webm xem được trên Chrome, Zalo PC, YouTube. iPhone cũ có thể cần đổi sang MP4.</span>}
+        </div>
+      )}
+      {preview && <div className="mt-2 text-xs text-purple-500 font-bold">Bản xem thử: xoay xem hình khối nhà của anh/chị. Mở gói Thiết kế để chốt hình khối, tạo ảnh phối cảnh, quay video và tải bản vẽ.</div>}
       <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
         Mô hình khối minh họa tỷ lệ, số tầng, mái, cửa và hướng nhà theo đúng mặt bằng 2D (chữ B = hướng Bắc). Vật liệu, màu sắc, chi tiết mặt tiền sẽ được thể hiện ở bước ảnh phối cảnh.
       </p>
