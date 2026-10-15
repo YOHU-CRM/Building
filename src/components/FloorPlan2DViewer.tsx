@@ -20,6 +20,8 @@ interface FloorPlan2DViewerProps {
   desiredDirection?: string;
   frontSetbackM?: number | string;
   backSetbackM?: number | string;
+  /** đổi giữa "Theo ý gia chủ" và "Theo đề xuất KTS" (lưu vào rooms.applyAdvice) */
+  onToggleAdvice?: (apply: boolean) => void;
 }
 
 export default function FloorPlan2DViewer({
@@ -35,7 +37,8 @@ export default function FloorPlan2DViewer({
   fengShuiAnalysis,
   desiredDirection,
   frontSetbackM,
-  backSetbackM
+  backSetbackM,
+  onToggleAdvice
 }: FloorPlan2DViewerProps) {
   const houseFacing = desiredDirection || fengShuiAnalysis?.directionVerdict?.direction || "Nam";
   const [activeFloor, setActiveFloor] = useState<number>(1);
@@ -305,6 +308,16 @@ export default function FloorPlan2DViewer({
         </div>
       </div>
 
+      {/* Bản vẽ theo ý gia chủ / theo đề xuất KTS */}
+      {rooms?.sketchLayout && rooms.sketchLayout.co_phac_thao !== false && onToggleAdvice && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-bold text-slate-400">Bản vẽ:</span>
+          <button onClick={() => onToggleAdvice(false)} className={`px-3 py-2 rounded-lg font-bold cursor-pointer min-h-[40px] ${!rooms.applyAdvice ? 'bg-amber-500 text-slate-950' : theme === 'dark' ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>✍️ Theo ý gia chủ (phác thảo)</button>
+          <button onClick={() => onToggleAdvice(true)} className={`px-3 py-2 rounded-lg font-bold cursor-pointer min-h-[40px] ${rooms.applyAdvice ? 'bg-blue-600 text-white' : theme === 'dark' ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>🧭 Theo đề xuất kiến trúc sư</button>
+          <span className="text-slate-400">Đề xuất nằm ở mục <b>TƯ VẤN KTS</b> trên bản vẽ; gia chủ quyết định có áp dụng hay không.</span>
+        </div>
+      )}
+
       {/* INFORMATIVE NOTICE */}
       <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2 text-xs text-amber-300 font-sans leading-relaxed">
         <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
@@ -363,9 +376,9 @@ export default function FloorPlan2DViewer({
       <div className="mt-3 flex items-center justify-between text-xs text-slate-400 flex-wrap gap-2">
         <span className="flex items-center gap-1">
           <Compass className="w-3.5 h-3.5 text-amber-400" />
-          {lang === 'vi' ? "Đã tối ưu công năng theo tuổi gia chủ & hướng đất đại cát." : "Optimized for homeowner orientation."}
+          {lang === 'vi' ? (fengShuiAnalysis ? "Bố trí có xét cung mệnh gia chủ (xem mục Phong thủy bố trí trên bản vẽ)." : "Chưa có dữ liệu cung mệnh — bố trí theo công năng.") : "Layout notes on the drawing."}
         </span>
-        <span className="text-emerald-500 font-bold">✔ {lang === 'vi' ? "Xuất PDF rõ nét 100% · Mở được trên điện thoại & máy tính" : "100% Crisp PDF Output"}</span>
+        <span className="text-emerald-500 font-bold">{lang === 'vi' ? "Bản vẽ sơ bộ phục vụ tư vấn — KTS lập hồ sơ kỹ thuật trước khi thi công" : "Preliminary drawing for consultation"}</span>
       </div>
 
     </div>

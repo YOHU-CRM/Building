@@ -10,7 +10,8 @@ interface ReportDashboardProps {
   aiReport: any;
   lang: string;
   theme: string;
-  triggerRenderConceptImage: (type: '2d' | '3d') => void;
+  triggerRenderConceptImage: (type: any) => void;
+  perspectiveSlot?: React.ReactNode;   // khu ảnh phối cảnh mới (ảnh tham chiếu + khung 3D)
   imageRendering: boolean;
   renderedConceptImage: string | null;
   setZoomImage: (url: string) => void;
@@ -23,7 +24,7 @@ interface ReportDashboardProps {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
 export default function ReportDashboard({ 
-  aiReport, lang, theme, triggerRenderConceptImage, imageRendering, renderedConceptImage, setZoomImage,
+  aiReport, lang, theme, triggerRenderConceptImage, imageRendering, renderedConceptImage, setZoomImage, perspectiveSlot,
   packageTier = 'free', onUpgradePackage, link_anh_phoi_canh, clientId
 }: ReportDashboardProps) {
   const [activeStep, setActiveStep] = useState(0);
@@ -274,6 +275,37 @@ export default function ReportDashboard({
                   </div>
                 )}
 
+                {/* Tổng vật tư / nhân công + yêu cầu của gia chủ đã đưa vào dự toán */}
+                {aiReport.priceSource && (
+                  <div className={`p-3 rounded-xl border text-xs sm:text-sm space-y-2 ${theme === 'dark' ? 'bg-[#121829] border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div><div className="text-[11px] uppercase font-bold text-slate-500">Tổng dự toán</div><div className="font-mono font-black text-rose-500">{formatCurrency(aiReport.totalBoqCost || 0, lang)}</div></div>
+                      <div><div className="text-[11px] uppercase font-bold text-slate-500">Phần vật tư, thiết bị</div><div className="font-mono font-black text-emerald-500">{formatCurrency(aiReport.priceSource.totalMaterial || 0, lang)}</div></div>
+                      <div><div className="text-[11px] uppercase font-bold text-slate-500">Phần nhân công (khoán)</div><div className="font-mono font-black text-amber-500">{formatCurrency(aiReport.priceSource.totalLabor || 0, lang)}</div></div>
+                    </div>
+                    {Array.isArray(aiReport.priceSource.yeuCau) && aiReport.priceSource.yeuCau.length > 0 && (
+                      <div>
+                        <div className="font-black mb-1">✅ Yêu cầu của gia chủ đã đưa vào dự toán</div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[12px] lg:text-xs">
+                            <thead><tr className="text-left text-slate-500"><th className="py-1 pr-2">Hạng mục</th><th className="py-1 pr-2">Gia chủ chọn</th><th className="py-1 pr-2">Áp vào</th><th className="py-1">Ghi chú</th></tr></thead>
+                            <tbody>
+                              {aiReport.priceSource.yeuCau.map((r: any, i: number) => (
+                                <tr key={i} className={`border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}>
+                                  <td className="py-1 pr-2 font-bold">{r.label}</td>
+                                  <td className="py-1 pr-2">{r.value}</td>
+                                  <td className={`py-1 pr-2 ${r.appliedTo.length ? '' : 'text-slate-500'}`}>{r.appliedTo.length ? r.appliedTo.join(' · ') : '—'}</td>
+                                  <td className="py-1 text-slate-500">{r.note}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {boqData.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {boqData.map((item: any, idx: number) => (
@@ -281,7 +313,7 @@ export default function ReportDashboard({
                         <div className="flex justify-between items-start">
                           <div>
                             <div className={`font-bold text-[15px] lg:text-sm ${theme === 'dark' ? 'text-slate-200' : 'text-slate-800'}`}>{item.name}</div>
-                            <div className="text-[12px] lg:text-[10px] uppercase font-bold text-slate-500">{item.brand} • {item.category}</div>
+                            <div className="text-[12px] lg:text-[10px] uppercase font-bold text-slate-500">{item.brand ? `${item.brand} • ` : ''}{item.category}</div>
                           </div>
                           <div className="text-right">
                             <div className="font-mono font-bold text-emerald-500 text-[14px] lg:text-xs">{item.quantity} {item.unit}</div>
@@ -291,8 +323,14 @@ export default function ReportDashboard({
                         <div className={`pl-2 border-l-2 text-[13.5px] lg:text-xs py-1 ${theme === 'dark' ? 'border-slate-700 text-slate-400' : 'border-slate-300 text-slate-600'}`}>
                           {item.specs}
                         </div>
-                        <div className="text-right font-mono font-bold text-[15px] lg:text-sm text-rose-500 mt-1">
-                          Σ: {formatCurrency(item.totalPrice, lang)}
+                        <div className="flex justify-between items-end gap-2 mt-1">
+                          {(item.material || item.labor) ? (
+                            <div className="text-[12px] lg:text-[11px] font-mono leading-snug">
+                              <div className="text-emerald-500">Vật tư: {formatCurrency(item.material || 0, lang)}</div>
+                              <div className="text-amber-500">Nhân công: {formatCurrency(item.labor || 0, lang)}</div>
+                            </div>
+                          ) : <span />}
+                          <div className="text-right font-mono font-bold text-[15px] lg:text-sm text-rose-500">Σ: {formatCurrency(item.totalPrice, lang)}</div>
                         </div>
                       </div>
                     ))}
@@ -532,7 +570,7 @@ export default function ReportDashboard({
 
             {aiReport.priceSource && (
               <div className={`text-xs leading-relaxed p-3 rounded-xl border ${theme === 'dark' ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600'}`}>
-                3 gói dưới đây cùng phương án <b>{aiReport.priceSource.optionName}</b>, khác nhau ở vật tư hoàn thiện. Số liệu khớp 100% với PDF và CRM (bảng đơn giá {aiReport.priceSource.version}).
+                3 gói dưới đây cùng phương án <b>{aiReport.priceSource.optionName}</b>, khác nhau ở vật tư hoàn thiện. Cùng một bộ tính với PDF và CRM (bảng đơn giá {aiReport.priceSource.version}).
               </div>
             )}
             {aiReport.threeOptions && (
@@ -563,6 +601,7 @@ export default function ReportDashboard({
               </div>
             )}
 
+            {perspectiveSlot ? perspectiveSlot : (
             <div className={`mt-6 p-4 rounded-xl border ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
               <h4 className={`text-xs font-bold uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-[#FFD700]' : 'text-slate-800'}`}>
                 {rt.aiVisualTitle}
@@ -613,6 +652,7 @@ export default function ReportDashboard({
                 </div>
               )}
             </div>
+            )}
 
             <div className="flex flex-col items-end gap-2 pt-4">
               {/* Nút trả phí — chỉ dành cho gói có phí */}

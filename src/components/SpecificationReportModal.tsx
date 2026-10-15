@@ -466,10 +466,12 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
     const boqRowsHtml = boqResult.lines.map((line, idx) => `
       <tr>
         <td style="text-align: center; font-weight: bold;">${idx + 1}</td>
-        <td><b>${line.item.name}</b></td>
+        <td><b>${line.item.name}</b><br/><span style="font-size: 8.5pt; color: #475569;">${line.spec || ''}</span></td>
         <td style="text-align: center;">${line.item.unit}</td>
         <td style="text-align: right; font-weight: bold;">${line.formattedQuantity}</td>
         <td style="text-align: right;">${line.unitPrice.toLocaleString('vi-VN')} đ</td>
+        <td style="text-align: right;">${Math.round(line.materialAmount || 0).toLocaleString('vi-VN')} đ</td>
+        <td style="text-align: right;">${Math.round(line.laborAmount || 0).toLocaleString('vi-VN')} đ</td>
         <td style="text-align: right; font-weight: bold; color: #7f1d1d;">${line.formattedTotalAmount}</td>
       </tr>
     `).join('\n');
@@ -589,13 +591,15 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
               <th style="width: 40pt; text-align: center;">ĐVT</th>
               <th style="width: 75pt; text-align: right;">Khối Lượng</th>
               <th style="width: 75pt; text-align: right;">Đơn Giá (VNĐ)</th>
+              <th style="width: 80pt; text-align: right;">Vật Tư (VNĐ)</th>
+              <th style="width: 80pt; text-align: right;">Nhân Công (VNĐ)</th>
               <th style="width: 90pt; text-align: right;">Thành Tiền (VNĐ)</th>
             </tr>
           </thead>
           <tbody>
             ${boqRowsHtml}
             <tr style="background: #0f172a; color: #ffffff; font-weight: bold;">
-              <td colspan="5" style="text-align: right; text-transform: uppercase; padding: 8pt; color: #f59e0b;">
+              <td colspan="7" style="text-align: right; text-transform: uppercase; padding: 8pt; color: #f59e0b;">
                 TỔNG CỘNG DỰ TOÁN BÓC TÁCH (BOQ) — ${currentOption.name}:
               </td>
               <td style="text-align: right; padding: 8pt; color: #f59e0b; font-size: 12pt;">
@@ -1263,6 +1267,8 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                                         <th className="p-2 border border-slate-400 text-center w-12">ĐVT</th>
                                         <th className="p-2 border border-slate-400 text-right">Khối lượng</th>
                                         <th className="p-2 border border-slate-400 text-right">Đơn giá (VNĐ)</th>
+                                        <th className="p-2 border border-slate-400 text-right">Vật tư (VNĐ)</th>
+                                        <th className="p-2 border border-slate-400 text-right">Nhân công (VNĐ)</th>
                                         <th className="p-2 border border-slate-400 text-right">Thành tiền (VNĐ)</th>
                                       </tr>
                                     </thead>
@@ -1270,15 +1276,17 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                                       {lines.map((line, idx) => (
                                         <tr key={line.item.id}>
                                           <td className="p-2 border border-slate-300 text-center font-bold">{idx + 1}</td>
-                                          <td className="p-2 border border-slate-300 font-bold">{line.item.name}</td>
+                                          <td className="p-2 border border-slate-300 font-bold">{line.item.name}<div className="font-normal text-[10px] text-slate-600">{line.spec}</div></td>
                                           <td className="p-2 border border-slate-300 text-center font-mono">{line.item.unit}</td>
                                           <td className="p-2 border border-slate-300 font-bold text-slate-900 font-mono text-right">{line.formattedQty}</td>
                                           <td className="p-2 border border-slate-300 text-slate-600 font-mono text-right">{line.unitPrice.toLocaleString('vi-VN')} đ</td>
+                                          <td className="p-2 border border-slate-300 text-emerald-800 font-mono text-right">{Math.round(line.materialAmount || 0).toLocaleString('vi-VN')} đ</td>
+                                          <td className="p-2 border border-slate-300 text-amber-800 font-mono text-right">{Math.round(line.laborAmount || 0).toLocaleString('vi-VN')} đ</td>
                                           <td className="p-2 border border-slate-300 font-bold text-red-900 font-mono text-right">{line.formattedTotalAmount}</td>
                                         </tr>
                                       ))}
                                       <tr className="bg-red-50 font-black text-red-950">
-                                        <td colSpan={5} className="p-2 border border-slate-400 text-right uppercase">
+                                        <td colSpan={7} className="p-2 border border-slate-400 text-right uppercase">
                                           TỔNG CỘNG DỰ TOÁN BÓC TÁCH (BOQ):
                                         </td>
                                         <td className="p-2 border border-slate-400 text-right font-mono text-sm text-red-900">
@@ -1633,6 +1641,8 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                                   <th className="p-2.5 border border-slate-700 text-center w-12">ĐVT</th>
                                   <th className="p-2.5 border border-slate-700 text-right text-yellow-300">Khối lượng</th>
                                   <th className="p-2.5 border border-slate-700 text-right">Đơn giá (VNĐ)</th>
+                                  <th className="p-2.5 border border-slate-700 text-right text-emerald-300">Vật tư (VNĐ)</th>
+                                  <th className="p-2.5 border border-slate-700 text-right text-amber-200">Nhân công (VNĐ)</th>
                                   <th className="p-2.5 border border-slate-700 text-right text-amber-300">Thành tiền (VNĐ)</th>
                                   <th className="p-2.5 border border-slate-700">Giải thích dễ hiểu cho khách</th>
                                 </tr>
@@ -1641,16 +1651,18 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                                 {lines.map((line, idx) => (
                                   <tr key={line.item.id} className="hover:bg-slate-900/60 transition">
                                     <td className="p-2.5 border border-slate-800 text-center text-slate-400">{idx + 1}</td>
-                                    <td className="p-2.5 border border-slate-800 font-bold text-white">{line.item.name}</td>
+                                    <td className="p-2.5 border border-slate-800 font-bold text-white">{line.item.name}<div className="font-normal text-[11px] text-slate-400">{line.spec}</div></td>
                                     <td className="p-2.5 border border-slate-800 text-center text-slate-400 font-mono">{line.item.unit}</td>
                                     <td className="p-2.5 border border-slate-800 font-bold text-amber-300 font-mono text-right">{line.formattedQty}</td>
                                     <td className="p-2.5 border border-slate-800 text-slate-400 font-mono text-right">{line.unitPrice.toLocaleString('vi-VN')} đ</td>
+                                    <td className="p-2.5 border border-slate-800 text-emerald-300 font-mono text-right">{Math.round(line.materialAmount || 0).toLocaleString('vi-VN')} đ</td>
+                                    <td className="p-2.5 border border-slate-800 text-amber-200 font-mono text-right">{Math.round(line.laborAmount || 0).toLocaleString('vi-VN')} đ</td>
                                     <td className="p-2.5 border border-slate-800 font-bold text-emerald-400 font-mono text-right">{line.formattedTotalAmount}</td>
                                     <td className="p-2.5 border border-slate-800 text-slate-300 text-[11px] italic">{line.item.clientExplanation}</td>
                                   </tr>
                                 ))}
                                 <tr className="bg-amber-950/40 font-black text-white">
-                                  <td colSpan={5} className="p-3 border border-slate-700 text-right uppercase text-amber-300">
+                                  <td colSpan={7} className="p-3 border border-slate-700 text-right uppercase text-amber-300">
                                     TỔNG CỘNG DỰ TOÁN BÓC TÁCH (BOQ):
                                   </td>
                                   <td className="p-3 border border-slate-700 text-right font-mono text-sm text-yellow-300">

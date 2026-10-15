@@ -250,11 +250,18 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
     if (mode === 'corner') c.camera.position.set(t.x - d * 0.55, d * 0.55, t.z + d * 0.8);
     c.controls.update();
   };
+  const [sent, setSent] = useState(false);
+  /** gửi ảnh 3D sang khu "Ảnh phối cảnh" làm khung hình khối (JPEG cho nhẹ) */
+  const useForPerspective = () => {
+    const c = ctxRef.current; if (!c) return;
+    c.controls.update(); c.renderer.render(c.scene, c.camera);
+    onSnapshot?.(c.renderer.domElement.toDataURL('image/jpeg', 0.9));
+    setSent(true); setTimeout(() => setSent(false), 2500);
+  };
   const snapshot = () => {
     const c = ctxRef.current; if (!c) return;
     c.controls.update(); c.renderer.render(c.scene, c.camera);
     const url = c.renderer.domElement.toDataURL('image/png');
-    onSnapshot?.(url);
     const a = document.createElement('a');
     a.href = url; a.download = `3D_hinh_khoi_${String(customerName || 'nha').replace(/\s+/g, '_')}.png`; a.click();
   };
@@ -269,7 +276,10 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
           <h4 className="text-sm sm:text-base font-black uppercase tracking-tight">🧊 {lang === 'vi' ? '3D Hình Khối — dựng từ mặt bằng' : '3D Massing Model'}</h4>
           <p className="text-xs text-slate-400">{model ? model.summary.join(' · ') : ''}</p>
         </div>
-        <button onClick={snapshot} className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">📸 {lang === 'vi' ? 'Chụp ảnh 3D (PNG)' : 'Snapshot PNG'}</button>
+        <div className="flex flex-wrap gap-2">
+          {onSnapshot && <button onClick={useForPerspective} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{sent ? '✓ Đã gửi sang Ảnh phối cảnh' : '🎨 Dùng làm khung ảnh phối cảnh'}</button>}
+          <button onClick={snapshot} className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">📸 {lang === 'vi' ? 'Tải ảnh 3D (PNG)' : 'Download PNG'}</button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">

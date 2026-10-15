@@ -325,8 +325,8 @@ export const StructuralOptionsSection: React.FC<StructuralOptionsSectionProps> =
           {[
             { id: "thach_cao", label: "Trần Thạch Cao Vĩnh Tường", desc: "Chống ẩm, phẳng đẹp", icon: "🏛️" },
             { id: "than_tre", label: "Tấm Sợi Than Tre (Bamboo)", desc: "Vân đá/vân gỗ sang trọng", icon: "🎍" },
-            { id: "nhom", label: "Trần Nhôm Hợp Kim (Clip-in)", desc: "Chống oxy hóa, bền vĩnh cửu", icon: "⚙️" },
-            { id: "nhua_nano", label: "Nhựa Nano / Lam Sóng", desc: "Chống nước 100%, dễ lau chùi", icon: "🌿" },
+            { id: "nhom", label: "Trần Nhôm Hợp Kim (Clip-in)", desc: "Chống oxy hóa, tháo lắp bảo trì dễ", icon: "⚙️" },
+            { id: "nhua_nano", label: "Nhựa Nano / Lam Sóng", desc: "Chịu nước tốt, dễ lau chùi", icon: "🌿" },
             { id: "go", label: "Gỗ Tự Nhiên / Công Nghiệp", desc: "Ấm cúng & Đẳng cấp", icon: "🪵" },
             { id: "custom", label: "Tùy chọn khác...", desc: "Tự nhập theo ý muốn", icon: "✏️" },
           ].map((item) => {
@@ -405,7 +405,7 @@ export const StructuralOptionsSection: React.FC<StructuralOptionsSectionProps> =
           </div>
 
           <p className="text-xs sm:text-sm font-black text-red-600 dark:text-red-400 leading-relaxed">
-            {t.epsAdvantageInfo?.tagline || "Rút ngắn 50% tiến độ · Tiết kiệm 25%-35% chi phí · Chống nứt thấm tuyệt đối"}
+            {t.epsAdvantageInfo?.tagline || "Thi công nhanh hơn BTCT · Chi phí thấp nhất trong 3 phương án · Hạn chế nứt thấm (số liệu cụ thể xem dự toán)"}
           </p>
 
           {/* PA3 Specs Inputs */}
