@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { setbacksFor, roomsFor } from './siteGeometry';
 import html2canvas from 'html2canvas';
 import { UserInfo, ConstructionInfo } from '../types';
 import { StructuralOption } from '../data/structuralOptions';
@@ -118,9 +119,9 @@ export async function exportSpecificationToPdf({
     totalConstructionArea: sTotal,
     requestedBedrooms: constructionInfo?.rooms?.bedroomCount,
     requestedBathrooms: constructionInfo?.rooms?.bathroomCount,
-    rooms: constructionInfo?.rooms,
-    frontSetbackM: (constructionInfo as any)?.frontSetbackM,
-    backSetbackM: (constructionInfo as any)?.backSetbackM
+    rooms: roomsFor(constructionInfo),
+    frontSetbackM: setbacksFor(constructionInfo).front,
+    backSetbackM: setbacksFor(constructionInfo).back
   });
   const floorPlanSvgDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(floorPlanSvg)}`;
 

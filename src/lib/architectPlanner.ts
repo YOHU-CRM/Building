@@ -358,10 +358,12 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   if (skHas(floor, 'wc').some((r: any) => r.vi_tri === 'giua' && r.ben === 'ca_ngang')) sketchNotes.push('↺ WC giữa nhà trong phác thảo được dời sát tường hông (tránh trung cung, dễ thông gió).');
   let preferredDoorCol: number | null = null;
   if (floor === 1) {
-    add({ id: 'front_yard', type: 'yard', name: parking === 'none' ? 'Sân trước' : 'Sân trước · để xe', x: 0, y: -frontSB, w: W, h: frontSB, outside: true });
-    add({ id: 'back_yard', type: 'yard', name: 'Sân sau · phơi, thoát khí bếp', x: 0, y: H, w: W, h: backSB, outside: true });
+    if (frontSB >= 0.3) add({ id: 'front_yard', type: 'yard', name: parking === 'none' ? 'Sân trước' : 'Sân trước · để xe', x: 0, y: -frontSB, w: W, h: frontSB, outside: true });
+    if (backSB >= 0.3) add({ id: 'back_yard', type: 'yard', name: 'Sân sau · phơi, thoát khí bếp', x: 0, y: H, w: W, h: backSB, outside: true });
   } else {
-    add({ id: 'balcony', type: 'balcony', name: 'Ban công', x: 0, y: -Math.min(1.2, frontSB), w: W, h: Math.min(1.2, frontSB), outside: true });
+    // ban công đua ra 1,2m (khi nhập kích thước nhà, ban công vẫn đua ra phía trước theo quy chuẩn ≤ 1,4m)
+    const bal = frontSB >= 0.3 ? Math.min(1.2, frontSB) : 1.2;
+    add({ id: 'balcony', type: 'balcony', name: 'Ban công', x: 0, y: -bal, w: W, h: bal, outside: true });
   }
 
   /* ── Lõi thang + WC (xếp chồng mọi tầng) ── */

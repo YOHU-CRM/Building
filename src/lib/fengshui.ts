@@ -40,6 +40,10 @@ export interface FengShuiCalculationResult {
   advice2026: string;               // Lời khuyên động thổ năm khởi công
   favorableDates2026: string[];     // Tháng cát lành (tham khảo)
   borrowAgeCandidates: number[];    // Năm sinh nam giới có thể mượn tuổi
+  borrowAgeDetails: { year: number; canChi: string; why: string }[];
+  auspiciousDays: AuspiciousDay[];  // ngày giờ khởi công cụ thể (lịch Hoàng đạo)
+  spouseAdvice: string[];           // giải pháp khi vợ chồng khác nhóm Đông/Tây Tứ Mệnh
+  menhQuaiExplain: string;          // giải thích Đông/Tây Tứ Mệnh dễ hiểu
   directionVerdict: DirectionVerdict;
   deepAnalysis: string;             // Luận giải chuyên sâu
 }
@@ -431,20 +435,105 @@ export function checkBuildYear(birthYear: number, targetYear: number) {
   };
 }
 
-/** Gợi ý năm sinh nam giới (tuổi mụ 30–70) không phạm hạn nào trong năm khởi công */
+/* ── Quan hệ địa chi (Tý = 0) ── */
+const chiOf = (year: number) => ((year - 4) % 12 + 12) % 12;
+const isXungChi = (a: number, b: number) => (a + 6) % 12 === b;
+const HAI_PAIRS = [[0, 7], [1, 6], [2, 5], [3, 4], [8, 11], [9, 10]];
+const isHaiChi = (a: number, b: number) => HAI_PAIRS.some(([x, y]) => (a === x && b === y) || (a === y && b === x));
+const HINH_GROUPS = [[2, 5, 8], [1, 10, 7], [0, 3]];
+const isHinhChi = (a: number, b: number) => a !== b && HINH_GROUPS.some(g => g.includes(a) && g.includes(b));
+const TAM_HOP = [[8, 0, 4], [11, 3, 7], [2, 6, 10], [5, 9, 1]];
+const isTamHop = (a: number, b: number) => a !== b && TAM_HOP.some(g => g.includes(a) && g.includes(b));
+const LUC_HOP = [[0, 1], [2, 11], [3, 10], [4, 9], [5, 8], [6, 7]];
+const isLucHop = (a: number, b: number) => LUC_HOP.some(([x, y]) => (a === x && b === y) || (a === y && b === x));
+
+/** Gợi ý năm sinh nam giới (tuổi mụ 30–70) mượn tuổi động thổ.
+ *  Điều kiện: không phạm Tam Tai, Kim Lâu, Hoang Ốc; không xung, không hình, không hại với năm khởi công; không trùng năm tuổi.
+ *  Ưu tiên tuổi tam hợp / lục hợp với năm khởi công. */
+export function findBorrowAgeDetails(targetYear: number, limit = 6): { year: number; canChi: string; why: string }[] {
+  const tChi = chiOf(targetYear);
+  const out: { year: number; canChi: string; why: string; score: number }[] = [];
+  for (let age = 30; age <= 70; age++) {
+    const y = targetYear - age + 1;
+    const c = checkBuildYear(y, targetYear);
+    const bc = chiOf(y);
+    if (!c.clean || c.isTruc || isHinhChi(bc, tChi) || isHaiChi(bc, tChi)) continue;
+    const hop = isTamHop(bc, tChi) ? 'tam hợp với năm' : isLucHop(bc, tChi) ? 'lục hợp với năm' : '';
+    const score = (hop ? 10 : 0) + (age >= 40 && age <= 60 ? 3 : 0);
+    out.push({ year: y, canChi: getCanChi(y), why: `tuổi mụ ${c.age}: không Tam Tai, Kim Lâu, Hoang Ốc; không xung, hình, hại năm khởi công${hop ? '; ' + hop + ' (rất tốt)' : ''}`, score });
+  }
+  return out.sort((a, b) => b.score - a.score || a.year - b.year).slice(0, limit).sort((a, b) => a.year - b.year).map(({ score, ...r }) => r);
+}
 export function findBorrowAgeCandidates(targetYear: number, limit = 8): number[] {
-  const out: number[] = [];
-  for (let age = 40; out.length < limit && age <= 70; age++) {
-    const y = targetYear - age + 1;
-    const c = checkBuildYear(y, targetYear);
-    if (c.clean && !c.isTruc) out.push(y);
+  return findBorrowAgeDetails(targetYear, limit).map(d => d.year);
+}
+
+/** gia chủ có phạm hạn làm nhà năm khởi công không (Tam Tai, Kim Lâu, Hoang Ốc, xung Thái Tuế) */
+function listPhamPre(birthYear: number, targetYear: number): boolean {
+  const c = checkBuildYear(birthYear, targetYear);
+  return c.isTamTai || c.isKimLau || c.isHoangOc || c.isXung;
+}
+
+/* ═══════════ NGÀY GIỜ HOÀNG ĐẠO ═══════════ */
+function jdToDate(jd: number): { d: number; m: number; y: number } {
+  let a: number, b: number, c: number;
+  if (jd > 2299160) { a = jd + 32044; b = Math.floor((4 * a + 3) / 146097); c = a - Math.floor((b * 146097) / 4); }
+  else { b = 0; c = jd + 32082; }
+  const d0 = Math.floor((4 * c + 3) / 1461), e = c - Math.floor((1461 * d0) / 4), m0 = Math.floor((5 * e + 2) / 153);
+  return { d: e - Math.floor((153 * m0 + 2) / 5) + 1, m: m0 + 3 - 12 * Math.floor(m0 / 10), y: b * 100 + d0 - 4800 + Math.floor(m0 / 10) };
+}
+const THAN = ['Thanh Long', 'Minh Đường', 'Thiên Hình', 'Chu Tước', 'Kim Quỹ', 'Bảo Quang', 'Bạch Hổ', 'Ngọc Đường', 'Thiên Lao', 'Huyền Vũ', 'Tư Mệnh', 'Câu Trần'];
+const HOANG_DAO = new Set([0, 1, 4, 5, 7, 10]);
+/** Thần trực của 1 địa chi (ngày theo tháng, hoặc giờ theo ngày) — quy tắc "Thanh Long khởi" phổ thông */
+const thanOf = (baseChi: number, chi: number) => { const start = (((baseChi % 6) - 2 + 6) % 6) * 2; return (chi - start + 12) % 12; };
+const HOUR_RANGE = ['23–1h', '1–3h', '3–5h', '5–7h', '7–9h', '9–11h', '11–13h', '13–15h', '15–17h', '17–19h', '19–21h', '21–23h'];
+const WEEKDAY = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+const TAM_NUONG = [3, 7, 13, 18, 22, 27];
+const NGUYET_KY = [5, 14, 23];
+export interface AuspiciousDay {
+  solar: string; weekday: string; lunar: string; dayCanChi: string; than: string; hours: string[]; note: string;
+}
+/** Chọn ngày giờ khởi công: ngày Hoàng đạo trong các tháng âm cát, tránh Tam Nương, Nguyệt Kỵ, ngày xung tuổi người đứng tên;
+ *  giờ Hoàng đạo ban ngày, tránh giờ xung tuổi và xung giờ sinh. */
+export function findAuspiciousDays(opts: { lunarYear: number; months: number[]; ownerYear: number; birthHour?: string; from?: Date; perMonth?: number; total?: number }): AuspiciousDay[] {
+  const ownerChi = chiOf(opts.ownerYear);
+  const bh = opts.birthHour ? parseInt(String(opts.birthHour).split(':')[0], 10) : NaN;
+  const birthChi = isNaN(bh) ? -1 : Math.floor(((bh + 1) % 24) / 2);
+  const from = opts.from || new Date();
+  const jdFrom = jdFromDate(from.getDate(), from.getMonth() + 1, from.getFullYear());
+  const out: (AuspiciousDay & { month: number; score: number })[] = [];
+  const tet = jdFromDate(1, 1, opts.lunarYear);
+  for (let jd = tet - 40; jd < tet + 420; jd++) {
+    if (jd < jdFrom) continue;
+    const sd = jdToDate(jd);
+    const lu = solarToLunar(sd.d, sd.m, sd.y);
+    if (lu.year !== opts.lunarYear || lu.leap || !opts.months.includes(lu.month)) continue;
+    if (TAM_NUONG.includes(lu.day) || NGUYET_KY.includes(lu.day)) continue;
+    const dayChi = (jd + 1) % 12, dayCan = (jd + 9) % 10;
+    if (isXungChi(dayChi, ownerChi)) continue;
+    const monthChi = (lu.month + 1) % 12;
+    const t = thanOf(monthChi, dayChi);
+    if (!HOANG_DAO.has(t)) continue;
+    const hours: string[] = [];
+    for (const h of [4, 5, 6, 7, 8, 3, 9]) {           // ưu tiên giờ ban ngày: Thìn, Tỵ, Ngọ, Mùi, Thân, Mão, Dậu
+      if (!HOANG_DAO.has(thanOf(dayChi, h)) || isXungChi(h, ownerChi) || (birthChi >= 0 && isXungChi(h, birthChi))) continue;
+      hours.push(`${CHI[h]} (${HOUR_RANGE[h]})`);
+      if (hours.length >= 3) break;
+    }
+    if (!hours.length) continue;
+    const score = (isTamHop(dayChi, ownerChi) || isLucHop(dayChi, ownerChi) ? 3 : 0) + (t === 0 || t === 4 ? 1 : 0);
+    const dd = (n: number) => String(n).padStart(2, '0');
+    out.push({
+      month: lu.month, score,
+      solar: `${dd(sd.d)}/${dd(sd.m)}/${sd.y}`, weekday: WEEKDAY[(jd + 1) % 7],
+      lunar: `${lu.day}/${lu.month} âm lịch`, dayCanChi: `${CAN[dayCan]} ${CHI[dayChi]}`, than: `${THAN[t]} Hoàng đạo`, hours,
+      note: isTamHop(dayChi, ownerChi) ? 'ngày tam hợp tuổi người đứng tên' : isLucHop(dayChi, ownerChi) ? 'ngày lục hợp tuổi người đứng tên' : 'không xung tuổi người đứng tên'
+    });
   }
-  for (let age = 39; out.length < limit && age >= 30; age--) {
-    const y = targetYear - age + 1;
-    const c = checkBuildYear(y, targetYear);
-    if (c.clean && !c.isTruc) out.push(y);
-  }
-  return out.sort((a, b) => a - b);
+  const per = opts.perMonth ?? 2, total = opts.total ?? 6;
+  const picked: typeof out = [];
+  opts.months.forEach(m => out.filter(o => o.month === m).sort((a, b) => b.score - a.score).slice(0, per).forEach(o => picked.push(o)));
+  return picked.sort((a, b) => a.solar.split('/').reverse().join('').localeCompare(b.solar.split('/').reverse().join(''))).slice(0, total).map(({ month, score, ...r }) => r);
 }
 
 /**
@@ -481,6 +570,8 @@ export function calculateFengShui(
 
   // Phối ngẫu
   let spouseAnalysisStr = "";
+  const spouseAdvice: string[] = [];
+  const menhQuaiExplain = `Đông Tứ Mệnh / Tây Tứ Mệnh là cách Bát Trạch chia 8 cung mệnh thành 2 nhóm. Nhóm Đông (Khảm, Ly, Chấn, Tốn) hợp 4 hướng Bắc, Nam, Đông, Đông Nam. Nhóm Tây (Càn, Khôn, Cấn, Đoài) hợp 4 hướng Tây Bắc, Tây Nam, Đông Bắc, Tây. Nhóm này chỉ dùng để chọn HƯỚNG (nhà, cửa, bếp, giường, bàn làm việc); không dùng để chọn tuổi mượn động thổ. Gia chủ thuộc ${cp.menhQuai} (cung ${cp.cungName}).`;
   if (spouseBirthYear) {
     const sGender = spouseGender || (gender === 'nam' ? 'nu' : 'nam');
     const sCp = calculateCungPhi(spouseBirthYear, sGender);
@@ -492,9 +583,22 @@ export function calculateFengShui(
         ? `Hai vợ chồng cùng ${cp.menhQuai} — chọn được hướng chung hợp cả hai.`
         : `Hai vợ chồng khác nhóm (${cp.menhQuai} / ${sCp.menhQuai}). Thường chọn hướng nhà theo người trụ cột kinh tế; hướng bếp, giường theo người còn lại.`) +
       (desiredDir ? ` Với hướng ${desiredDir}: ${sVerdict.isGood ? 'hợp' : 'không hợp'} với vợ/chồng (${sVerdict.star}).` : '');
+    if (!sameGroup) {
+      const who = sGender === 'nu' ? 'vợ' : 'chồng';
+      const sGood = sCp.goodDirs.join(', ');
+      spouseAdvice.push(`Hai người khác nhóm là chuyện rất thường gặp (khoảng một nửa các cặp vợ chồng); không phải điềm xấu, chỉ cần chia hướng hợp lý.`);
+      spouseAdvice.push(`Hướng nhà, cửa chính: theo người đứng tên / trụ cột kinh tế (gia chủ, ${cp.menhQuai}).`);
+      spouseAdvice.push(`Phòng ngủ chính: đặt đầu giường về hướng tốt của ${who} (${sGood}) để cân bằng cho ${who}; hoặc chọn phòng ngủ nằm ở cung tốt của ${who}.`);
+      spouseAdvice.push(`Bếp: miệng bếp (hướng núm vặn) quay về hướng tốt của người nấu chính; nếu ${who} nấu: ${sGood}.`);
+      spouseAdvice.push(`Bàn làm việc, bàn trang điểm của ${who}: ngồi quay mặt về hướng tốt của ${who}.`);
+      if (desiredDir && !sVerdict.isGood) spouseAdvice.push(`Hướng ${desiredDir} phạm ${sVerdict.star} với ${who}: nên làm cổng hoặc sảnh vào lệch về một hướng tốt của ${who} (nếu đất cho phép), cửa phòng ngủ chính mở về hướng tốt của ${who}. Đây là cách hóa giải phổ biến, không cần đổi hướng nhà.`);
+      spouseAnalysisStr += `\n  Giải pháp: ` + spouseAdvice.slice(1).join(' ');
+    }
   }
 
-  const hourStr = birthHour ? `\n\n✦ Giờ sinh (${birthHour}): dùng để chọn giờ hoàng đạo làm lễ khởi công.` : "";
+  const bhH = birthHour ? parseInt(String(birthHour).split(':')[0], 10) : NaN;
+  const bhChi = isNaN(bhH) ? -1 : Math.floor(((bhH + 1) % 24) / 2);
+  const hourStr = bhChi >= 0 ? `\n\n✦ Giờ sinh ${birthHour} (giờ ${CHI[bhChi]}): giờ khởi công đề xuất bên dưới đã là giờ Hoàng đạo và tránh giờ ${CHI[(bhChi + 6) % 12]} (xung giờ sinh) và giờ xung tuổi.` : "";
 
   // 4. Màu sắc theo Nạp Âm
   let favorableColors: string[] = [];
@@ -543,8 +647,9 @@ export function calculateFengShui(
       ? `Năm ${tYear} là năm tuổi (trực Thái Tuế) của gia chủ — nhiều nơi kiêng, nên cân nhắc mượn tuổi.`
       : `Tuổi ${canChi} không xung Thái Tuế năm ${tCanChi}.`;
 
-  const borrowAgeCandidates = findBorrowAgeCandidates(tYear);
-  const borrowStr = borrowAgeCandidates.map(y => `${y} ${getCanChi(y)}`).join(', ');
+  const borrowAgeDetails = findBorrowAgeDetails(tYear);
+  const borrowAgeCandidates = borrowAgeDetails.map(d => d.year);
+  const borrowStr = borrowAgeDetails.map(d => `${d.year} ${d.canChi}`).join(', ');
   const femaleNote = gender === 'nu'
     ? ' Lưu ý: theo tục lệ, Kim Lâu/Hoang Ốc thường xét theo tuổi người nam đứng tên; gia chủ nữ có thể mượn tuổi chồng/người thân nam.'
     : '';
@@ -559,7 +664,7 @@ export function calculateFengShui(
   if (listPham.length === 0) {
     advice = `Năm ${tCanChi} (${tYear}), gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) không phạm Tam Tai, Kim Lâu, Hoang Ốc${c.isTruc ? '' : ', không xung Thái Tuế'}. Gia chủ có thể tự đứng tên khởi công; cần chọn ngày, giờ hoàng đạo cụ thể hợp tuổi.${c.isTruc ? ' ' + thaiTueDetail : ''}${femaleNote}`;
   } else {
-    advice = `Năm ${tCanChi} (${tYear}), gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) phạm ${listPham.join(", ")}. Phương án thường dùng: (1) lùi năm khởi công, hoặc (2) mượn tuổi người nam không phạm hạn năm ${tYear} đứng tên động thổ, đổ mái. Gợi ý năm sinh có thể mượn: ${borrowStr}. Nên ưu tiên người thân trong gia đình và cùng nhóm ${cp.menhQuai}.${femaleNote}`;
+    advice = `Năm ${tCanChi} (${tYear}), gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) phạm ${listPham.join(", ")}. Phương án thường dùng: (1) lùi năm khởi công, hoặc (2) mượn tuổi người nam không phạm hạn năm ${tYear} đứng tên động thổ, đổ mái. Gợi ý năm sinh có thể mượn: ${borrowStr} (đã loại tuổi xung, hình, hại với năm ${tCanChi}; ưu tiên tuổi tam hợp, lục hợp). Người được mượn tuổi nên là nam giới, khỏe mạnh, gia đình êm ấm, ưu tiên người thân. Khi động thổ: người mượn tuổi làm lễ và cuốc nhát đầu, gia chủ tránh mặt lúc đó, sau đó người mượn tuổi "bán" lại nhà tượng trưng cho gia chủ.${femaleNote}`;
   }
 
   // 7. Tháng cát lành (tham khảo — tiết khí đầu tháng âm lịch)
@@ -570,18 +675,32 @@ export function calculateFengShui(
     Hỏa:  ["Tháng 3 âm lịch (Tiết Thanh Minh - Mộc sinh Hỏa)", "Tháng 4 âm lịch (Tiết Lập Hạ - Hỏa vượng)", "Tháng 5 âm lịch (Tiết Mang Chủng)", "Tháng 6 âm lịch (Tiết Tiểu Thử)"],
     Thổ:  ["Tháng 3 âm lịch (Tiết Thanh Minh)", "Tháng 6 âm lịch (Tiết Tiểu Thử - Hỏa sinh Thổ)", "Tháng 9 âm lịch (Tiết Hàn Lộ)", "Tháng 12 âm lịch (Tiết Tiểu Hàn)"]
   };
-  let favorableDates = [...(elementMonths[napAm.hanh] || elementMonths.Kim)];
-  if (chiIndex % 3 === 1) favorableDates[1] = "Tháng 3 âm lịch (Tiết Thanh Minh)";
-  else if (chiIndex % 3 === 2) favorableDates[2] = "Tháng 9 âm lịch (Tiết Hàn Lộ)";
-  favorableDates = Array.from(new Set(favorableDates)).map(m => `${m} năm ${tCanChi} ${tYear}`);
-  favorableDates.push("→ Ngày giờ cụ thể: chọn ngày Hoàng đạo hợp tuổi trong các tháng trên, tránh ngày Tam Nương, Nguyệt Kỵ, Sát Chủ.");
+  let monthList = [...(elementMonths[napAm.hanh] || elementMonths.Kim)];
+  if (chiIndex % 3 === 1) monthList[1] = "Tháng 3 âm lịch (Tiết Thanh Minh)";
+  else if (chiIndex % 3 === 2) monthList[2] = "Tháng 9 âm lịch (Tiết Hàn Lộ)";
+  // gộp theo số tháng (tránh "Tháng 3" xuất hiện 2 lần)
+  const byMonth = new Map<number, string>();
+  monthList.forEach(m => { const n = parseInt((m.match(/Tháng (\d+)/) || [])[1], 10); if (!byMonth.has(n) || m.length > byMonth.get(n)!.length) byMonth.set(n, m); });
+  const months = [...byMonth.keys()].sort((a, b) => a - b);
+  let favorableDates = months.map(n => `${byMonth.get(n)} năm ${tCanChi} ${tYear}`);
+  // Người đứng tên động thổ: gia chủ (nếu không phạm hạn) hoặc người mượn tuổi đầu tiên
+  const standYear = listPhamPre(year, tYear) ? (borrowAgeDetails[0]?.year || year) : year;
+  const auspiciousDays = findAuspiciousDays({ lunarYear: tYear, months, ownerYear: standYear, birthHour, perMonth: 2, total: 6 });
+  if (auspiciousDays.length) {
+    favorableDates.push(`→ Ngày giờ khởi công đề xuất (theo tuổi ${standYear === year ? 'gia chủ ' + canChi : 'người mượn tuổi ' + getCanChi(standYear) + ' ' + standYear}):`);
+    auspiciousDays.forEach(d => favorableDates.push(`📅 ${d.weekday} ${d.solar} (${d.lunar}) — ngày ${d.dayCanChi}, ${d.than}, ${d.note}. Giờ tốt: ${d.hours.join(', ')}.`));
+  } else {
+    favorableDates.push("→ Chưa tìm được ngày phù hợp trong các tháng trên (có thể các ngày đã qua). Hãy chọn năm khởi công khác.");
+  }
+  favorableDates.push("ℹ️ Ngày giờ trên do tool tính theo lịch Hoàng đạo phổ thông: đã tránh Tam Nương, Nguyệt Kỵ, ngày xung tuổi người đứng tên, giờ xung tuổi và giờ sinh. Trước khi khởi công, gia chủ nên nhờ thầy phong thủy tại địa phương xem lại (Sát Chủ, Thọ Tử, trực, sao tốt xấu) để chốt ngày giờ chính xác.");
   // Tháng mưa bão: lưu ý thi công móng
   const rainNote = `Lưu ý thi công: tránh đào móng, đổ bê tông trong cao điểm mưa bão của địa phương (miền Bắc: tháng 7–9 dương; miền Trung: tháng 9–11 dương; miền Nam: tháng 6–10 dương).`;
 
   // 8. Luận giải chuyên sâu
   const deepAnalysis = `Gia chủ sinh năm âm lịch ${canChi} (${year}).
 Bản mệnh ngũ hành: ${napAm.detail} (Hành ${napAm.hanh}). Cung Phi Bát Trạch: ${cungPhiStr}.
-Theo Bát Trạch, gia chủ thuộc ${cp.menhQuai}. Hướng tốt: ${cp.goodDirs.join(', ')}. Hướng xấu: ${cp.badDirs.join(', ')}.
+${menhQuaiExplain}
+Hướng tốt: ${cp.goodDirs.join(', ')}. Hướng xấu: ${cp.badDirs.join(', ')}.
 ✦ KẾT LUẬN HƯỚNG NHÀ: ${directionVerdict.summary}${directionVerdict.remedy.length ? '\n' + directionVerdict.remedy.map(r => '  • ' + r).join('\n') : ''}
 Màu sắc công trình nên ưu tiên ${favorableColors[1]} và ${favorableColors[0]}; hạn chế ${unfavorableColors[0]} ở mảng lớn (mặt tiền, mái).
 ✦ XEM TUỔI NĂM KHỞI CÔNG ${tYear} (${tCanChi}): ${tamTaiDetail} ${kimLauDetail} ${hoangOcDetail} ${thaiTueDetail}
@@ -612,6 +731,10 @@ ${rainNote}${spouseAnalysisStr}${hourStr}
     advice2026: advice,
     favorableDates2026: favorableDates,
     borrowAgeCandidates,
+    borrowAgeDetails,
+    auspiciousDays,
+    spouseAdvice,
+    menhQuaiExplain,
     directionVerdict,
     deepAnalysis
   };

@@ -71,10 +71,12 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
 
   /* ── Bố cục trang ── */
   const VW = 1120;
-  const drawL = 70, drawT = 130, drawMaxW = 600, drawMaxH = 900;
   const free = plan.mode === 'free';
   // Ranh đất: nhà ống = rộng W, từ sân trước đến sân sau; phác thảo tự do = ranh tính theo sân vườn quanh nhà
-  const LOT = plan.lot || { x: 0, y: -FS, w: W, h: L };
+  const LOT = plan.lot || { x: 0, y: -FS, w: W, h: H + FS + BS };
+  // Bố cục tự co giãn: khu đất dáng NGANG → hình vẽ rộng hết khổ phía trên, bảng chữ xếp 2 cột bên dưới (không bỏ trống giấy)
+  const wide = LOT.w / LOT.h > 1.25;
+  const drawL = 70, drawT = 130, drawMaxW = wide ? 990 : 600, drawMaxH = wide ? 640 : 900;
   const sc = Math.min(drawMaxW / (LOT.w + 0.0001), drawMaxH / LOT.h);
   const dW = LOT.w * sc, dH = LOT.h * sc;
   const ox = drawL + (drawMaxW - dW) / 2;
@@ -85,7 +87,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   const fs = Math.max(9, Math.min(14, sc * 0.33));
 
   const out: string[] = [];
-  const panelX = 720, panelW = 380;
+  let panelX = wide ? 40 : 720, panelW = wide ? 510 : 380;
 
   /* ── Header ── */
   out.push(`<rect x="0" y="0" width="${VW}" height="96" fill="#0f172a"/>`);
@@ -416,14 +418,16 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   }
 
   /* ── Mũi tên Bắc ── */
-  const nx = px(LOT.x + LOT.w) + 50 > panelX - 40 ? drawL + drawMaxW - 30 : px(LOT.x + LOT.w) + 50, ny = drawT + 40;
+  const nx = wide ? Math.min(px(LOT.x + LOT.w) - 34, VW - 40) : (px(LOT.x + LOT.w) + 50 > panelX - 40 ? drawL + drawMaxW - 30 : px(LOT.x + LOT.w) + 50), ny = drawT + 40;
   out.push(`<g transform="translate(${nx} ${ny}) rotate(${plan.northPageDeg})"><circle r="24" fill="#fff" stroke="#0f172a" stroke-width="1.2"/><path d="M 0 -20 L 7 8 L 0 3 L -7 8 Z" fill="#dc2626"/><text y="-26" font-size="12" font-weight="900" text-anchor="middle" fill="#0f172a">B</text></g>`);
 
   /* ── Bảng bên phải ── */
-  let y = drawT;
+  const panelTop = wide ? bottom + 84 : drawT;
+  let y = panelTop;
+  let col1Bottom = 0;
   const P: string[] = [];
   const head = (t: string) => { P.push(`<rect x="${panelX}" y="${y}" width="${panelW}" height="24" fill="#0f172a"/><text x="${panelX + 10}" y="${y + 16}" font-size="12" font-weight="800" fill="#fbbf24">${esc(t)}</text>`); y += 40; };
-  const line = (t: string, color = '#0f172a', bold = false, max = 58) => {
+  const line = (t: string, color = '#0f172a', bold = false, max = Math.floor(panelW / 6.4)) => {
     wrap(t, max).forEach(l => { P.push(`<text x="${panelX + 10}" y="${y}" font-size="11" fill="${color}" ${bold ? 'font-weight="700"' : ''}>${esc(l)}</text>`); y += 15; });
   };
 
@@ -449,6 +453,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     plan.advice.forEach((n, k) => { line(`${k + 1}. ${n}`, plan.adviceApplied ? '#15803d' : '#1d4ed8'); y += 2; });
     y += 6;
   }
+  if (wide) { col1Bottom = y; panelX = 580; y = panelTop; }   // sang cột 2
   head('PHONG THỦY BỐ TRÍ');
   plan.fengShuiNotes.forEach(n => { line('• ' + n); y += 2; });
   y += 6;
@@ -461,7 +466,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   if (free) line('Nét đứt xanh: lối vào của khách · nét đứt cam: lối ra bếp phụ · nét đứt xám: ô mở thông giữa các không gian chung.', '#334155');
   line('Bản vẽ sơ bộ phục vụ tư vấn. Cần KTS/KS lập hồ sơ thiết kế kỹ thuật, khảo sát hiện trạng trước khi thi công & xin phép xây dựng.', '#64748b');
 
-  const contentBottom = Math.max(bottom + 70, y + 10);
+  const contentBottom = Math.max(bottom + 70, y + 10, col1Bottom + 10);
   const VH = Math.ceil(contentBottom + 40);
   const footer = `<rect x="0" y="${VH - 30}" width="${VW}" height="30" fill="#f1f5f9"/><text x="28" y="${VH - 11}" font-size="10.5" fill="#475569">Yohu ConsTech · ${new Date().toLocaleDateString('vi-VN')} · Tỷ lệ minh họa (1 ô lưới = 1/3 chiều nhà) · Kích thước tính theo tim tường, đơn vị m</text>`;
 

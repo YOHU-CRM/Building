@@ -80,12 +80,26 @@ export function computeSite(dimensions?: string, frontSetback?: any, backSetback
  * Khi khách xác nhận "vẽ theo phác thảo tự do" (nhà vườn / nhà rộng), diện tích xây dựng
  * lấy đúng diện tích nhà trên bản vẽ phác thảo → bản vẽ và dự toán luôn cùng một con số.
  */
+/** Khách nhập số đo là gì: 'nha' = kích thước NHÀ XÂY (mặc định), 'dat' = kích thước THỬA ĐẤT (sổ đỏ, trừ khoảng lùi) */
+export function dimsKindOf(ct: any): 'nha' | 'dat' { return ct?.dimensionsKind === 'dat' ? 'dat' : 'nha'; }
+/** Khoảng lùi dùng cho tính toán: nhập kích thước nhà → 0 (nhà = đúng số đo khách nhập) */
+export function setbacksFor(ct: any): { front: any; back: any } {
+  return dimsKindOf(ct) === 'dat' ? { front: ct?.frontSetbackM, back: ct?.backSetbackM } : { front: 0, back: 0 };
+}
+/** rooms gửi bộ vẽ kèm loại số đo (bộ vẽ phác thảo tự do ưu tiên số đo trong mô tả hơn số trên bản vẽ tay) */
+export function roomsFor(ct: any): any { return { ...(ct?.rooms || {}), dimsKind: dimsKindOf(ct) }; }
+
 export function computeSiteFor(ct: any): SiteGeometry {
-  const base = computeSite(ct?.dimensions, ct?.frontSetbackM, ct?.backSetbackM);
+  const sb = setbacksFor(ct);
+  const base0 = computeSite(ct?.dimensions, sb.front, sb.back);
+  const base = dimsKindOf(ct) === 'nha' && base0.hasDims
+    ? { ...base0, note: `Nhà xây ${base0.lotWidthM}×${base0.houseLengthM}m = ${base0.footprint}m² (đúng số đo gia chủ nhập). Nếu số đo là của thửa đất, chọn "Kích thước thửa đất" để tool trừ khoảng lùi.` }
+    : base0;
+  if (ct?.rooms && !ct.rooms.dimsKind) ct = { ...ct, rooms: roomsFor(ct) };
   try {
     const floors = Math.max(1, Math.round(Number(ct?.floors) || 1));
     if (!hasFreeSketch(ct?.rooms, 1, floors)) return base;
-    const p = planFreeLayout({ widthM: base.lotWidthM, lengthM: base.lotLengthM, floor: 1, totalFloors: floors, rooms: ct.rooms, desiredDirection: ct?.desiredDirection });
+    const p = planFreeLayout({ widthM: base.lotWidthM, lengthM: base.lotLengthM, floor: 1, totalFloors: floors, rooms: roomsFor(ct), desiredDirection: ct?.desiredDirection });
     // bộ vẽ đã nới ranh đất theo kích thước khách nhập → dùng đúng ranh trên bản vẽ
     const lotW = p.lot ? p.lot.w : base.lotWidthM;
     const lotL = p.lot ? p.lot.h : base.lotLengthM;
