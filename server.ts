@@ -1393,6 +1393,10 @@ JSON Format:
     parsed.advice2026 = baseInfo.advice2026;
     parsed.directionVerdict = baseInfo.directionVerdict;
     parsed.borrowAgeCandidates = baseInfo.borrowAgeCandidates;
+    parsed.borrowAgeDetails = baseInfo.borrowAgeDetails;
+    parsed.auspiciousDays = baseInfo.auspiciousDays;
+    parsed.spouseAdvice = baseInfo.spouseAdvice;
+    parsed.menhQuaiExplain = baseInfo.menhQuaiExplain;
     parsed.targetYear = baseInfo.targetYear;
     parsed.luckyNumbers = baseInfo.luckyNumbers;
     parsed.isLocal = false;
@@ -2275,6 +2279,10 @@ function generateLocalFengShui(name: string, year: number, gender: string, direc
     luckyNumbers: calc.luckyNumbers,
     targetYear: calc.targetYear,
     borrowAgeCandidates: calc.borrowAgeCandidates,
+    borrowAgeDetails: calc.borrowAgeDetails,
+    auspiciousDays: calc.auspiciousDays,
+    spouseAdvice: calc.spouseAdvice,
+    menhQuaiExplain: calc.menhQuaiExplain,
     directionVerdict: calc.directionVerdict,
     isLocal: true
   };
@@ -2419,7 +2427,15 @@ function fallbackExtractFromDescription(desc: string) {
     phong_tho: lower.includes("phòng thờ") || lower.includes("thờ"),
     gara: lower.includes("gara") || lower.includes("ô tô") ? "oto" : "xe_may",
     loai_dat: lower.includes("đất yếu") || lower.includes("ao") && lower.includes("lấp") ? "yeu" : lower.includes("đất cát") ? "cat" : "chua_biet",
-    kich_thuoc_dat: matchDim ? { rong_truoc: parseFloat(matchDim[1].replace(',', '.')), rong_sau: parseFloat(matchDim[1].replace(',', '.')), dai: parseFloat(matchDim[2].replace(',', '.')), hinh_dang: "chu_nhat" } : undefined,
+    // Số đo khách gõ = KÍCH THƯỚC NHÀ XÂY, trừ khi ngay trước đó ghi "đất / thửa / sổ đỏ / lô đất"
+    ...(() => {
+      if (!matchDim) return {};
+      const before = lower.slice(Math.max(0, (matchDim.index || 0) - 18), matchDim.index || 0);
+      const w = parseFloat(matchDim[1].replace(',', '.')), l = parseFloat(matchDim[2].replace(',', '.'));
+      return /đất|thửa|sổ đỏ|lô/.test(before)
+        ? { kich_thuoc_dat: { rong_truoc: w, rong_sau: w, dai: l, hinh_dang: "chu_nhat" } }
+        : { kich_thuoc_nha: { rong: w, dai: l, nguon: "mo_ta" } };
+    })(),
     loai_ket_cau_chinh: lower.includes("eps") || lower.includes("bê tông nhẹ") || lower.includes("gông 3d") ? "Bê tông nhẹ EPS đúc liền khối & Gông 3D" : "Bê tông cốt thép truyền thống",
     so_mat_tien: lower.includes("2 mặt tiền") || lower.includes("hai mặt tiền") ? 2 : 1,
     thep_hop_cot: "",
@@ -2471,7 +2487,8 @@ Trích xuất thông tin công trình thành một đối tượng JSON THUẦN 
   "loai_vach": "Loại vách (Panel EPS / Panel PU / Khác)",
   "loai_tran": "Loại trần (Nhựa Nano / Thạch cao / Khác)",
   "phong_cach": "Phong cách kiến trúc (Hiện đại, Tân cổ điển, Tối giản, ...)",
-  "kich_thuoc_dat": { "rong_truoc": 5.0, "rong_sau": 5.0, "dai": 20.0, "hinh_dang": "chu_nhat | no_hau | top_hau | meo" },
+  "kich_thuoc_nha": { "rong": null, "dai": null, "nguon": "mo_ta | ban_ve" },
+  "kich_thuoc_dat": { "rong_truoc": null, "rong_sau": null, "dai": null, "hinh_dang": "chu_nhat | no_hau | top_hau | meo" },
   "khoang_lui_truoc": null,
   "khoang_lui_sau": null,
   "loai_dat": "tot | yeu | cat | chua_biet",
@@ -2522,9 +2539,9 @@ QUY TẮC ƯU TIÊN:
    (9) "loi_vao": khách từ đường đi vào phía nào ("canh") và bắt đầu từ đoạn nào ("tu"). "ngoai_nha": công trình / khu ngoài nhà và phía của nó (ở Việt Nam đất rộng hay có bếp phụ đun củi, giếng, ao, vườn).
    (10) Chữ nào không đọc được: đoán gần nhất, "tin_cay" < 0.6 và ghi nguyên văn nét đó vào "doc_khong_ro". TUYỆT ĐỐI không thêm phòng không có trên bản vẽ.
 0d. "do_tin_cay": 0–1 cho mức chắc chắn của từng trường (chữ mờ, nét vẽ không rõ → dưới 0.6). Trường nào dưới 0.7 phải ghi lý do vào "canh_bao".
-1. Sổ đỏ ưu tiên lấy diện tích, kích thước, địa chỉ, hướng đất.
-2. Ảnh bản vẽ ưu tiên lấy số tầng, công năng.
-3. Text mô tả dùng bổ sung loại kết cấu chính, vật liệu, phong cách.
+1. MÔ TẢ VĂN BẢN CỦA GIA CHỦ LÀ YÊU CẦU CAO NHẤT. Số đo gia chủ gõ (vd "5x20", "nhà 8x12") là KÍCH THƯỚC NHÀ CẦN XÂY → "kich_thuoc_nha" (nguon "mo_ta"), trừ khi gia chủ ghi rõ là đất/thửa/sổ đỏ. Số tầng, số phòng, phong cách, vật liệu trong mô tả được ưu tiên hơn mọi ảnh.
+2. Sổ đỏ: chỉ cho "kich_thuoc_dat", địa chỉ, hướng đất. Không dùng kích thước đất làm kích thước nhà.
+3. Bản vẽ tay / ảnh: chỉ là THAM CHIẾU cách bố trí không gian và kiểu dáng. Nếu mô tả không có số đo nhà mà bản vẽ ghi số đo nhà → "kich_thuoc_nha" (nguon "ban_ve"). Khi bản vẽ mâu thuẫn mô tả: theo mô tả, ghi mâu thuẫn vào "canh_bao".
 Nếu trường nào không tìm thấy thông tin, để trống ("") hoặc giá trị mặc định (so_tang: 1, so_mat_tien: 1, loai_ket_cau_chinh: "Bê tông cốt thép truyền thống"). TUYỆT ĐỐI KHÔNG TỰ BỊA SỐ LIỆU.`;
 
     parts.push({ text: prompt });
@@ -2696,8 +2713,19 @@ app.post("/api/admin/dispatch-video", adminAuthMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Missing projectId" });
     }
 
-    const videoStudioUrl = (process.env.VIDEO_STUDIO_URL || "https://ais-pre-pu7a7mgzu5meihkevrptbc-83853799035.asia-southeast1.run.app").trim();
-    const videoToken = (process.env.VIDEO_STUDIO_SECRET || "YOHU_SECRET_2026").trim(); // Nên đặt VIDEO_STUDIO_SECRET trên Vercel
+    const envUrl = (process.env.VIDEO_STUDIO_URL || "").trim();
+    const envSecret = (process.env.VIDEO_STUDIO_SECRET || "").trim();
+    const videoStudioUrl = envUrl || "https://ais-pre-pu7a7mgzu5meihkevrptbc-83853799035.asia-southeast1.run.app";
+    const videoToken = envSecret || "YOHU_SECRET_2026";
+    const imgList = (Array.isArray(images) ? images : []).filter((x: any) => typeof x === "string" && x.length > 0);
+    const warnings: string[] = [];
+    if (!envUrl) warnings.push("Chưa đặt biến VIDEO_STUDIO_URL trên Vercel — đang dùng địa chỉ Video Studio mặc định.");
+    if (!envSecret) warnings.push("Chưa đặt biến VIDEO_STUDIO_SECRET trên Vercel — đang dùng mã bí mật mặc định, Video Studio có thể từ chối.");
+
+    // Không có ảnh thì không dựng được video → báo ngay, không gửi
+    if (!imgList.length) {
+      return res.status(400).json({ success: false, reason: "NO_IMAGES", error: "Hồ sơ chưa có ảnh phối cảnh / ảnh tham chiếu nào. Hãy tạo ảnh phối cảnh (gói Thiết kế) trước, rồi gửi video.", warnings });
+    }
 
     const payload = {
       secretToken: videoToken,
@@ -2708,37 +2736,54 @@ app.post("/api/admin/dispatch-video", adminAuthMiddleware, async (req, res) => {
       direction: direction || "",
       buildingType: buildingType || "Nhà phố",
       packageType: packageType || "STANDARD",
-      images: Array.isArray(images) ? images : []
+      images: imgList
     };
 
     console.log(`[Video Studio Dispatch] Sending project ${projectId} to ${videoStudioUrl}/api/create-project-video ...`);
 
+    // Gửi sang Video Studio, chờ tối đa 25 giây; phân loại lỗi để admin biết nguyên nhân
+    let ok = false;
+    let reason = "";
+    let detail = "";
     let studioResponseData: any = null;
-    let studioStatus = 200;
     try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 25000);
       const response = await fetch(`${videoStudioUrl}/api/create-project-video`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      studioStatus = response.status;
-      if (response.ok) {
-        try {
-          studioResponseData = await response.json();
-        } catch {
-          studioResponseData = { success: true };
-        }
+        body: JSON.stringify(payload),
+        signal: ctrl.signal
+      }).finally(() => clearTimeout(timer));
+      const text = await response.text().catch(() => "");
+      try { studioResponseData = text ? JSON.parse(text) : {}; } catch { studioResponseData = { raw: text.slice(0, 300) }; }
+      if (response.ok && studioResponseData?.success !== false) {
+        ok = true;
       } else {
-        const errText = await response.text().catch(() => "");
-        console.warn(`[Video Studio Dispatch Response ${response.status}]:`, errText);
-        studioResponseData = { success: false, status: response.status, message: errText || "Video Studio response code " + response.status };
+        reason = response.status === 401 || response.status === 403 ? "AUTH"
+          : response.status === 404 ? "NOT_FOUND"
+          : response.status === 413 ? "TOO_LARGE"
+          : response.status >= 500 ? "STUDIO_ERROR" : "REJECTED";
+        detail = String(studioResponseData?.message || studioResponseData?.error || text || "").slice(0, 300);
+        console.warn(`[Video Studio Dispatch Response ${response.status}]:`, detail);
       }
     } catch (err: any) {
-      console.warn("[Video Studio Network Warning]:", err.message || err);
-      studioResponseData = { success: false, message: err.message || "Network connection issue to Video Studio" };
+      reason = err?.name === "AbortError" ? "TIMEOUT" : "NETWORK";
+      detail = String(err?.message || err).slice(0, 300);
+      console.warn("[Video Studio Network Warning]:", detail);
     }
+    const REASON_VI: Record<string, string> = {
+      AUTH: "Video Studio từ chối mã bí mật — kiểm tra VIDEO_STUDIO_SECRET trên Vercel trùng với Video Studio.",
+      NOT_FOUND: "Sai địa chỉ Video Studio (404) — kiểm tra VIDEO_STUDIO_URL.",
+      TOO_LARGE: "Ảnh gửi đi quá nặng — giảm số ảnh hoặc dùng ảnh nhỏ hơn.",
+      STUDIO_ERROR: "Video Studio đang lỗi / quá tải — thử lại sau ít phút.",
+      REJECTED: "Video Studio không nhận yêu cầu.",
+      TIMEOUT: "Video Studio không trả lời trong 25 giây (có thể đang khởi động) — thử gửi lại.",
+      NETWORK: "Không kết nối được Video Studio (máy chủ tắt / sai địa chỉ)."
+    };
+    const errorVi = ok ? "" : `${REASON_VI[reason] || "Gửi thất bại."}${detail ? " Chi tiết: " + detail : ""}`;
 
-    // Update in-memory / persistent order status
+    // Lưu trạng thái thật để admin xem lại
     const orderId = "VID-" + projectId;
     const existingOrder = inMemoryStore.videoOrders.get(orderId) || {};
     const updatedOrder = {
@@ -2747,34 +2792,38 @@ app.post("/api/admin/dispatch-video", adminAuthMiddleware, async (req, res) => {
       projectId,
       customerName: payload.customerName,
       packageType: payload.packageType,
-      status: studioResponseData?.success ? "RENDERING" : "DISPATCHED",
+      status: ok ? "RENDERING" : "FAILED",
       dispatchedAt: new Date().toISOString(),
+      error: errorVi,
       studioResponse: studioResponseData,
       videoUrl: studioResponseData?.videoUrl || studioResponseData?.url || existingOrder.videoUrl || ""
     };
     inMemoryStore.videoOrders.set(orderId, updatedOrder);
 
-    // Also update lead record if exists
     const leads = await getLeads();
     const lead = leads.find((l: any) => l.id === projectId);
     if (lead) {
-      lead.videoStatus = "RENDERING";
+      lead.videoStatus = ok ? "RENDERING" : "FAILED";
+      lead.videoError = errorVi;
+      lead.videoUpdatedAt = new Date().toISOString();
       lead.videoPackageType = payload.packageType;
-      if (studioResponseData?.videoUrl) {
-        lead.link_video_phoi_canh = studioResponseData.videoUrl;
-      }
+      if (studioResponseData?.videoUrl) lead.link_video_phoi_canh = studioResponseData.videoUrl;
       await saveLeadToFirestore(lead);
     }
 
+    if (!ok) {
+      return res.status(502).json({ success: false, reason, error: errorVi, warnings, imagesSent: imgList.length });
+    }
     res.json({
       success: true,
-      message: "Đã gửi lệnh tạo video thành công sang Video Studio!",
-      payload,
+      message: `Video Studio đã nhận lệnh (${imgList.length} ảnh). Video đang dựng.`,
+      warnings,
+      imagesSent: imgList.length,
       studioResponse: studioResponseData
     });
   } catch (err: any) {
     console.error("Error in dispatch-video:", err);
-    res.status(500).json({ error: err.message || "Failed to dispatch video creation" });
+    res.status(500).json({ success: false, error: "Lỗi máy chủ Yohu khi gửi video: " + (err.message || err) });
   }
 });
 
