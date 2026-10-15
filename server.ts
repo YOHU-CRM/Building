@@ -19,6 +19,8 @@ dotenv.config();
 // toàn bộ phần còn lại của server (đăng nhập Admin, /api/leads,...)
 // vẫn chạy bình thường như cũ, không bị sập theo.
 let firestoreDb: FirebaseFirestore.Firestore | null = null;
+let fbAdmin: any = null;          // firebase-admin (dùng cho Storage + FieldValue)
+let fbProjectId = "";
 
 async function initFirestore() {
   const svcJson = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -33,6 +35,8 @@ async function initFirestore() {
       admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
     }
     firestoreDb = admin.firestore();
+    fbAdmin = admin;
+    fbProjectId = String(serviceAccount.project_id || "");
     console.log("✅ [Firestore] Đã kết nối Firestore Admin — dữ liệu leads sẽ được lưu vĩnh viễn.");
   } catch (err) {
     console.error("❌ [Firestore] Không nạp được Firebase Admin (gói chưa cài đúng hoặc JSON sai) — tiếp tục dùng bộ nhớ tạm, các phần khác của app không bị ảnh hưởng:", err);
@@ -1017,6 +1021,31 @@ app.post("/api/admin/design-samples", adminAuthMiddleware, async (req, res) => {
   }
 });
 
+// Admin sửa mẫu thiết kế
+app.put("/api/admin/design-samples/:id", adminAuthMiddleware, async (req, res) => {
+  try {
+    if (!firestoreDb) return res.status(500).json({ ok: false, error: "Máy chủ chưa kết nối Firestore (FIREBASE_SERVICE_ACCOUNT)" });
+    const ref = firestoreDb.collection("designSamples").doc(String(req.params.id));
+    const d: any = await withTimeout(ref.get(), 5000);
+    if (!d?.exists) return res.status(404).json({ ok: false, error: "Không tìm thấy mẫu (mẫu mặc định không sửa được — hãy thêm mẫu mới)" });
+    const { id: _ignore, ...data } = req.body || {};
+    await withTimeout(ref.set({ ...data, updatedAt: new Date().toISOString() }, { merge: true }), 6000);
+    res.json({ ok: true });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message || "Update sample failed" }); }
+});
+// Admin xóa mẫu thiết kế (giao diện luôn hỏi xác nhận trước khi gọi)
+app.delete("/api/admin/design-samples/:id", adminAuthMiddleware, async (req, res) => {
+  try {
+    if (!firestoreDb) return res.status(500).json({ ok: false, error: "Máy chủ chưa kết nối Firestore (FIREBASE_SERVICE_ACCOUNT)" });
+    const ref = firestoreDb.collection("designSamples").doc(String(req.params.id));
+    const d: any = await withTimeout(ref.get(), 5000);
+    if (!d?.exists) return res.status(404).json({ ok: false, error: "Không tìm thấy mẫu (mẫu mặc định không xóa được)" });
+    await withTimeout(firestoreDb.collection("deletedDesignSamples").doc(String(req.params.id)).set({ ...d.data(), deletedAt: new Date().toISOString() }), 5000);
+    await withTimeout(ref.delete(), 5000);
+    res.json({ ok: true, backup: "deletedDesignSamples" });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message || "Delete sample failed" }); }
+});
+
 // Admin kích hoạt gói cho khách (cách duy nhất để mở gói trả phí)
 app.post("/api/admin/activate-package", adminAuthMiddleware, async (req, res) => {
   try {
@@ -1025,13 +1054,17 @@ app.post("/api/admin/activate-package", adminAuthMiddleware, async (req, res) =>
       return res.status(400).json({ ok: false, error: "Thiếu clientId hoặc gói không hợp lệ" });
     }
     await setVerifiedPackage(String(clientId), goi as GoiKey, { so_tien: Number(so_tien) || 0 });
+    let commission: any = null;
+    if (goi !== "free" && Number(so_tien) > 0) {
+      try { commission = await recordCommission({ clientId: String(clientId), product: goi, amount: Number(so_tien) }); } catch (e: any) { commission = { error: e?.message || String(e) }; }
+    }
     let gas: any = null;
     if (getGasUrl()) {
       try {
         gas = await forwardToGas({ type: "kich_hoat_goi", ma_kh: clientId, goi_mua: GOI_LABEL[goi as GoiKey], so_tien: Number(so_tien) || 0 });
       } catch (e: any) { gas = { ok: false, error: e?.message || String(e) }; }
     }
-    res.json({ ok: true, goi, label: GOI_LABEL[goi as GoiKey], gas });
+    res.json({ ok: true, goi, label: GOI_LABEL[goi as GoiKey], gas, commission });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message || "Activate failed" });
   }
@@ -1045,6 +1078,20 @@ app.get("/api/leads", adminAuthMiddleware, async (req, res) => {
 
 // Objective 8: Get Tong_Hop_CTV summaries
 app.get("/api/tong-hop-ctv", adminAuthMiddleware, async (req, res) => {
+  if ((await getAppSettings()).ctvCommissionEnabled) {
+    // sổ hoa hồng trên máy chủ (đã bật): tổng hợp trực tiếp
+    const [leads, coms, partners] = await Promise.all([getLeads(), listCommissions(), listPartners()]);
+    const map: Record<string, any> = {};
+    const row = (code: string) => map[code] || (map[code] = { code, loaiDoiTac: partners.find(p => normCode(p.ma_ctv) === code)?.loai_doi_tac || ctvTypeOf(code), totalKH: 0, totalVideo: 0, totalRevenue: 0, totalCommission: 0, commissionPaid: 0, commissionDebt: 0, lastUpdated: new Date().toLocaleDateString("vi-VN") });
+    leads.forEach(l => { const c = leadCtvCode(l); if (c) row(c).totalKH++; });
+    coms.filter(c => c.status !== "Hủy").forEach(c => {
+      const r = row(normCode(c.ma_ctv || c.refCode));
+      if (String(c.product || "").startsWith("VID")) r.totalVideo++;
+      r.totalRevenue += Number(c.revenue) || 0; r.totalCommission += Number(c.amount) || 0;
+      if (c.status === "Đã thanh toán") r.commissionPaid += Number(c.amount) || 0; else r.commissionDebt += Number(c.amount) || 0;
+    });
+    return res.json(Object.values(map));
+  }
   try {
     if (getGasUrl()) {
       const data = await forwardToGas({ type: "get_tong_hop_ctv" });
@@ -1180,8 +1227,13 @@ app.get("/api/mau-thiet-ke", async (req, res) => {
 /* ── Cài đặt vận hành do admin bật/tắt (lưu Firestore config/app_settings; không có Firestore thì giữ trong bộ nhớ) ── */
 const DEFAULT_APP_SETTINGS = {
   videoOrderEnabled: true,     // khách được xem & đặt gói video
-  videoAutoDispatch: false     // gửi tự động sang Video Studio (tốn tín dụng API) — mặc định TẮT: admin dựng video thủ công
+  videoAutoDispatch: false,    // gửi tự động sang Video Studio (tốn tín dụng API) — mặc định TẮT: admin dựng video thủ công
+  freePreview3D: false,        // khách chưa mua gói được xoay xem 3D (bản xem thử, không tải / quay / chốt)
+  serverImageStorage: false,   // lưu ảnh phối cảnh lên Firebase Storage (có thể phát sinh phí khi dùng nhiều)
+  ctvCommissionEnabled: false, // máy chủ tự ghi sổ hoa hồng CTV khi admin xác nhận đã thu tiền (chỉ ghi sổ, KHÔNG chuyển tiền)
+  renderLimitPerClient: 15     // số lượt AI vẽ ảnh phối cảnh tối đa / khách (bảo vệ tín dụng API)
 };
+const NUMERIC_SETTINGS = new Set(["renderLimitPerClient"]);
 let appSettingsCache: typeof DEFAULT_APP_SETTINGS | null = null;
 async function getAppSettings() {
   if (appSettingsCache) return appSettingsCache;
@@ -1195,11 +1247,18 @@ async function getAppSettings() {
   appSettingsCache = s;
   return s;
 }
-app.get("/api/admin/settings", adminAuthMiddleware, async (_req, res) => res.json({ ok: true, settings: await getAppSettings() }));
+app.get("/api/admin/settings", adminAuthMiddleware, async (_req, res) => {
+  const bucket = await getBucket().catch(() => null);
+  res.json({ ok: true, settings: await getAppSettings(), status: { firestore: !!firestoreDb, storageBucket: bucket ? bucket.name : null, gas: !!getGasUrl() } });
+});
 app.post("/api/admin/settings", adminAuthMiddleware, async (req, res) => {
   const cur = await getAppSettings();
   const next = { ...cur };
-  (Object.keys(DEFAULT_APP_SETTINGS) as (keyof typeof DEFAULT_APP_SETTINGS)[]).forEach(k => { if (typeof req.body?.[k] === "boolean") next[k] = req.body[k]; });
+  (Object.keys(DEFAULT_APP_SETTINGS) as (keyof typeof DEFAULT_APP_SETTINGS)[]).forEach(k => {
+    const v = req.body?.[k];
+    if (NUMERIC_SETTINGS.has(k)) { const n = Number(v); if (v !== undefined && isFinite(n)) (next as any)[k] = Math.max(0, Math.min(500, Math.round(n))); }
+    else if (typeof v === "boolean") (next as any)[k] = v;
+  });
   appSettingsCache = next;
   let saved = false;
   try {
@@ -1207,6 +1266,134 @@ app.post("/api/admin/settings", adminAuthMiddleware, async (req, res) => {
   } catch (e: any) { console.warn("[settings] write:", e?.message || e); }
   res.json({ ok: true, settings: next, persisted: saved, note: saved ? "" : "Chưa có Firestore: cài đặt chỉ giữ đến khi máy chủ khởi động lại." });
 });
+
+
+/* ══════════════ LƯU ẢNH (Firebase Storage) · LƯỢT VẼ AI · SỔ HOA HỒNG CTV ══════════════ */
+let bucketCache: any = null;
+let bucketCheckedAt = 0;
+/** Bucket Firebase Storage: biến FIREBASE_STORAGE_BUCKET, nếu không có thì thử tên mặc định của dự án */
+async function getBucket(): Promise<any> {
+  if (!fbAdmin) return null;
+  if (bucketCache) return bucketCache;
+  if (Date.now() - bucketCheckedAt < 10 * 60 * 1000) return null;
+  bucketCheckedAt = Date.now();
+  const names = [(process.env.FIREBASE_STORAGE_BUCKET || "").trim(), fbProjectId && `${fbProjectId}.firebasestorage.app`, fbProjectId && `${fbProjectId}.appspot.com`].filter(Boolean) as string[];
+  for (const n of names) {
+    try {
+      const b = fbAdmin.storage().bucket(n.replace(/^gs:\/\//, ""));
+      const [ok] = await withTimeout(b.exists(), 6000) as any;
+      if (ok) { bucketCache = b; return b; }
+    } catch (e: any) { console.warn(`[Storage] bucket ${n}:`, e?.message || e); }
+  }
+  return null;
+}
+
+const renderUsageMem = new Map<string, number>();
+async function getRenderUsed(clientId: string): Promise<number> {
+  const id = String(clientId || "").trim(); if (!id) return 0;
+  if (firestoreDb) {
+    try { const d: any = await withTimeout(firestoreDb.collection("renderUsage").doc(id).get(), 4000); if (d?.exists) { const n = Number(d.data()?.count) || 0; renderUsageMem.set(id, n); return n; } } catch { /* dùng bộ nhớ */ }
+  }
+  return renderUsageMem.get(id) || 0;
+}
+async function setRenderUsed(clientId: string, n: number) {
+  const id = String(clientId || "").trim(); if (!id) return;
+  renderUsageMem.set(id, n);
+  if (firestoreDb) { try { await withTimeout(firestoreDb.collection("renderUsage").doc(id).set({ count: n, updatedAt: new Date().toISOString() }, { merge: true }), 4000); } catch { /* bỏ qua */ } }
+}
+// Admin mở thêm lượt vẽ cho 1 khách
+app.post("/api/admin/render-usage", adminAuthMiddleware, async (req, res) => {
+  const clientId = String(req.body?.clientId || "").trim();
+  if (!clientId) return res.status(400).json({ ok: false, error: "Thiếu mã khách" });
+  const before = await getRenderUsed(clientId);
+  if (req.body?.reset) await setRenderUsed(clientId, 0);
+  res.json({ ok: true, clientId, before, now: req.body?.reset ? 0 : before, limit: (await getAppSettings()).renderLimitPerClient });
+});
+
+/* ── CTV / B2B ── */
+const CTV_PRODUCTS = ["standard", "design", "VID-TEASER", "VID-01", "VID-02", "VID-03"];
+const CTV_PRODUCT_LABEL: Record<string, string> = { standard: "Báo cáo đầy đủ", design: "Báo cáo + Bản vẽ", "VID-TEASER": "Video Teaser", "VID-01": "Video Tiêu chuẩn", "VID-02": "Video Nâng cao", "VID-03": "Video Cinematic" };
+// Bảng % mặc định (giữ đúng ma trận cũ của video; gói báo cáo/thiết kế = 0% cho đến khi admin đặt %)
+const CTV_DEFAULT_RATES: Record<string, Record<string, number>> = {
+  "CTV Thường": { standard: 0, design: 0, "VID-TEASER": 15, "VID-01": 15, "VID-02": 20, "VID-03": 0 },
+  "B2B Đối Tác": { standard: 0, design: 0, "VID-TEASER": 15, "VID-01": 15, "VID-02": 20, "VID-03": 25 }
+};
+const ctvTypeOf = (code: string) => code.startsWith("VIP") ? "B2B VIP" : code.startsWith("B2B") ? "B2B Đối Tác" : "CTV Thường";
+function partnerRate(p: any, product: string): number {
+  const r = p?.rates?.[product];
+  if (r !== undefined && r !== null && r !== "" && isFinite(Number(r))) return Math.max(0, Math.min(100, Number(r)));
+  if (p?.loai_doi_tac === "B2B VIP") return Number(p?.hh_thoa_thuan) || 25;
+  return CTV_DEFAULT_RATES[p?.loai_doi_tac || "CTV Thường"]?.[product] ?? 0;
+}
+const normCode = (c: any) => String(c || "").trim().toUpperCase();
+async function listPartners(): Promise<any[]> {
+  if (firestoreDb) {
+    try { const snap: any = await withTimeout(firestoreDb.collection("ctvPartners").get(), 5000); const list = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })); list.forEach((p: any) => inMemoryStore.ctvPartners.set(p.id, p)); return list; } catch (e: any) { console.warn("[CTV] read partners:", e?.message || e); }
+  }
+  return Array.from(inMemoryStore.ctvPartners.values());
+}
+async function getPartner(code: string): Promise<any | null> {
+  const id = normCode(code); if (!id) return null;
+  if (firestoreDb) { try { const d: any = await withTimeout(firestoreDb.collection("ctvPartners").doc(id).get(), 4000); if (d?.exists) return { id, ...d.data() }; } catch { /* bộ nhớ */ } }
+  return inMemoryStore.ctvPartners.get(id) || null;
+}
+async function savePartner(p: any) {
+  const id = normCode(p.ma_ctv);
+  const data = { ...p, id, ma_ctv: id, updatedAt: new Date().toISOString() };
+  inMemoryStore.ctvPartners.set(id, { ...(inMemoryStore.ctvPartners.get(id) || {}), ...data });
+  if (firestoreDb) await withTimeout(firestoreDb.collection("ctvPartners").doc(id).set(data, { merge: true }), 5000);
+  return data;
+}
+async function listCommissions(): Promise<any[]> {
+  if (firestoreDb) {
+    try { const snap: any = await withTimeout(firestoreDb.collection("commissions").get(), 5000); const list = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })); list.forEach((c: any) => inMemoryStore.commissions.set(c.id, c)); return list.sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt))); } catch (e: any) { console.warn("[CTV] read commissions:", e?.message || e); }
+  }
+  return Array.from(inMemoryStore.commissions.values()).sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+async function saveCommission(c: any) {
+  const data = { ...c, updatedAt: new Date().toISOString() };
+  inMemoryStore.commissions.set(c.id, { ...(inMemoryStore.commissions.get(c.id) || {}), ...data });
+  if (firestoreDb) await withTimeout(firestoreDb.collection("commissions").doc(String(c.id)).set(data, { merge: true }), 5000);
+}
+async function getLeadById(clientId: string): Promise<any | null> {
+  const id = String(clientId || "").trim(); if (!id) return null;
+  if (firestoreDb) { try { const d: any = await withTimeout(firestoreDb.collection("leads").doc(id).get(), 4000); if (d?.exists) return { id, ...d.data() }; } catch { /* bộ nhớ */ } }
+  return inMemoryStore.leads.get(id) || null;
+}
+const leadCtvCode = (lead: any) => normCode(lead?.affiliateData?.ref || lead?.affiliateData?.aid || lead?.ma_ctv || lead?.ref || "");
+
+/**
+ * GHI SỔ HOA HỒNG khi admin xác nhận đã thu tiền (kích hoạt gói có số tiền / đơn video hoàn thành).
+ * Chỉ ghi sổ — không chuyển tiền. Admin duyệt & đánh dấu "Đã thanh toán" thủ công.
+ * Mỗi khách + sản phẩm chỉ 1 dòng (kích hoạt lại không ghi trùng; dòng đã thanh toán không bị ghi đè).
+ */
+async function recordCommission(o: { clientId: string; product: string; amount: number; note?: string }) {
+  const st = await getAppSettings();
+  if (!st.ctvCommissionEnabled) return { skipped: "OFF" };
+  if (!(o.amount > 0)) return { skipped: "NO_AMOUNT" };
+  const lead = await getLeadById(o.clientId);
+  const code = leadCtvCode(lead);
+  if (!code) return { skipped: "NO_CTV" };
+  const partner = (await getPartner(code)) || { ma_ctv: code, loai_doi_tac: ctvTypeOf(code) };
+  if (partner.active === false) return { skipped: "CTV_INACTIVE", code };
+  const id = `COM-${o.clientId}-${o.product}`;
+  const old = inMemoryStore.commissions.get(id) || (firestoreDb ? await withTimeout(firestoreDb.collection("commissions").doc(id).get(), 4000).then((d: any) => d?.exists ? d.data() : null).catch(() => null) : null);
+  if (old && old.status === "Đã thanh toán") return { skipped: "ALREADY_PAID", id };
+  const rate = partnerRate(partner, o.product);
+  const manual = partner.loai_doi_tac === "CTV Thường" && o.product === "VID-03";
+  const com = {
+    id, refCode: code, ma_ctv: code, loai_doi_tac: partner.loai_doi_tac || ctvTypeOf(code), ten_ctv: partner.ten || "",
+    clientId: o.clientId, customerName: lead?.userInfo?.name || "", customerPhone: lead?.userInfo?.phone || "",
+    product: o.product, packageId: o.product, productLabel: CTV_PRODUCT_LABEL[o.product] || o.product,
+    revenue: Math.round(o.amount), rate, amount: Math.round(o.amount * rate / 100),
+    status: manual || rate <= 0 ? "Cần duyệt thủ công" : "Chờ duyệt",
+    note: o.note || (manual ? "CTV Thường bán gói Cinematic: admin tự quyết % (quy tắc cũ)" : rate <= 0 ? "Chưa đặt % cho sản phẩm này" : ""),
+    createdAt: old?.createdAt || new Date().toISOString()
+  };
+  await saveCommission(com);
+  if (getGasUrl()) forwardToGas({ type: "hoa_hong", ma_ctv: code, goi_video: o.product, so_tien_hh: com.amount, ho_ten_kh: com.customerName || "Khách", ma_don: id }).catch(() => {});
+  return { ok: true, commission: com };
+}
 
 app.get("/api/config", async (req, res) => {
   // Không trả địa chỉ Apps Script thật cho trình duyệt — chỉ trả đường dẫn proxy nội bộ
@@ -1216,7 +1403,11 @@ app.get("/api/config", async (req, res) => {
     hotline: (process.env.HOTLINE || "0973 480 488").trim(),
     bankInfo: (process.env.BANK_INFO || "").trim(),
     videoOrderEnabled: st.videoOrderEnabled,
-    videoAutoDispatch: st.videoAutoDispatch
+    videoAutoDispatch: st.videoAutoDispatch,
+    freePreview3D: st.freePreview3D,
+    serverImageStorage: st.serverImageStorage,
+    ctvCommissionEnabled: st.ctvCommissionEnabled,
+    renderLimitPerClient: st.renderLimitPerClient
   });
 });
 
@@ -2102,8 +2293,52 @@ Yêu cầu:
 });
 
 // Concept Rendering Generator - Integration using Gemini Image generation
+// Ảnh phối cảnh lưu trên máy chủ (Firebase Storage) — admin bật "Lưu ảnh trên máy chủ"
+app.post("/api/perspectives", async (req, res) => {
+  try {
+    const st = await getAppSettings();
+    if (!st.serverImageStorage) return res.status(409).json({ ok: false, reason: "OFF", error: "Admin chưa bật lưu ảnh trên máy chủ" });
+    const clientId = String(req.body?.clientId || "").trim();
+    if (!clientId) return res.status(400).json({ ok: false, error: "Thiếu mã khách" });
+    const goi = isAdminRequest(req) ? "design" : await getVerifiedPackage(clientId);
+    if (goi !== "design") return res.status(403).json({ ok: false, error: "Chỉ gói Thiết kế" });
+    const m = String(req.body?.image || "").match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+    if (!m) return res.status(400).json({ ok: false, error: "Ảnh không hợp lệ" });
+    const buf = Buffer.from(m[2], "base64");
+    if (buf.length > 5 * 1024 * 1024) return res.status(413).json({ ok: false, error: "Ảnh quá 5MB" });
+    const bucket = await getBucket();
+    if (!bucket) return res.status(503).json({ ok: false, reason: "NO_BUCKET", error: "Chưa có Firebase Storage (bật Storage trong Firebase hoặc đặt biến FIREBASE_STORAGE_BUCKET)" });
+    const ext = m[1].split("/")[1].replace("jpeg", "jpg");
+    const path = `perspectives/${clientId.replace(/[^\w-]/g, "_")}/${Date.now()}_${crypto.randomBytes(3).toString("hex")}.${ext}`;
+    const token = crypto.randomUUID();
+    await withTimeout(bucket.file(path).save(buf, { contentType: m[1], resumable: false, metadata: { cacheControl: "public, max-age=31536000", metadata: { firebaseStorageDownloadTokens: token } } }), 20000);
+    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    const shot = { url, label: String(req.body?.label || "").slice(0, 60), style: String(req.body?.style || "").slice(0, 60), view: req.body?.view === "interior" ? "interior" : "exterior", at: new Date().toISOString(), path };
+    if (firestoreDb && fbAdmin) {
+      const FV = fbAdmin.firestore.FieldValue;
+      await withTimeout(firestoreDb.collection("perspectives").doc(clientId).set({ shots: FV.arrayUnion(shot), updatedAt: shot.at }, { merge: true }), 5000).catch(() => {});
+      await withTimeout(firestoreDb.collection("leads").doc(clientId).set({ perspectiveUrls: FV.arrayUnion(url), link_anh_phoi_canh: url }, { merge: true }), 5000).catch(() => {});
+    }
+    res.json({ ok: true, url });
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message || "Upload failed" }); }
+});
+// Khách nạp lại ảnh đã lưu + link video admin đã gắn (đổi máy vẫn thấy)
+app.get("/api/perspectives/:clientId", async (req, res) => {
+  const clientId = String(req.params.clientId || "").trim();
+  let shots: any[] = [], videoUrl = "";
+  try {
+    if (firestoreDb && clientId) {
+      const d: any = await withTimeout(firestoreDb.collection("perspectives").doc(clientId).get(), 4000).catch(() => null);
+      if (d?.exists) shots = (d.data()?.shots || []).map((x: any) => ({ url: x.url, label: x.label, style: x.style, view: x.view, at: x.at })).slice(-12);
+    }
+    const lead = clientId ? await getLeadById(clientId) : null;
+    videoUrl = String(lead?.link_video_phoi_canh || "");
+  } catch { /* trả rỗng */ }
+  res.json({ ok: true, shots, videoUrl });
+});
+
 app.post("/api/generate-concept-image", async (req, res) => {
-  const { prompt = "", optionType = "3d", lang = "vi", loai_phong = "", clientId = "", view = "exterior", style = "", extra = "" } = req.body || {};
+  const { prompt = "", optionType = "3d", lang = "vi", loai_phong = "", clientId = "", view = "exterior", style = "", extra = "", shotLabel = "" } = req.body || {};
 
   // Gói lấy theo xác nhận của máy chủ — không tin giá trị goi_mua do trình duyệt gửi lên
   const verifiedGoi = isAdminRequest(req) ? "design" : await getVerifiedPackage(String(clientId || ""));
@@ -2113,6 +2348,14 @@ app.post("/api/generate-concept-image", async (req, res) => {
         ? "Ảnh phối cảnh chỉ áp dụng cho gói Thiết Kế. Liên hệ admin để kích hoạt."
         : "This feature is only available for the Design Package."
     });
+  }
+
+  // Giới hạn lượt vẽ / khách (admin không bị giới hạn)
+  const isAdm = isAdminRequest(req);
+  const renderLimit = (await getAppSettings()).renderLimitPerClient;
+  const used = isAdm ? 0 : await getRenderUsed(String(clientId || ""));
+  if (!isAdm && renderLimit > 0 && used >= renderLimit) {
+    return res.status(429).json({ code: "QUOTA", quota: { used, limit: renderLimit }, error: `Đã dùng hết ${renderLimit} lượt AI vẽ ảnh của gói. Liên hệ hotline để được mở thêm lượt.` });
   }
 
   if (FREE_KEYS.length + PAID_KEYS.length === 0) {
@@ -2127,11 +2370,16 @@ app.post("/api/generate-concept-image", async (req, res) => {
   const okImg = (x: any) => x && typeof x.data === "string" && /^image\/(png|jpeg|webp)$/.test(String(x.mimeType)) && x.data.length < 4_000_000;
   const massing = okImg(req.body?.massingImage) ? req.body.massingImage : null;
   const refs = (Array.isArray(req.body?.referenceImages) ? req.body.referenceImages : []).filter(okImg).slice(0, 3);
+  const styleImg = okImg(req.body?.styleImage) ? req.body.styleImage : null;
 
   const parts: any[] = [];
   if (massing) {
     parts.push({ text: "ẢNH 1 — KHUNG HÌNH KHỐI 3D của ngôi nhà (dựng từ mặt bằng thật). BẮT BUỘC giữ đúng: số tầng, tỷ lệ chiều cao/chiều rộng, hình dáng và độ dốc mái, vị trí cửa chính, cửa sổ, ban công, hiên, góc nhìn camera." });
     parts.push({ inlineData: { mimeType: massing.mimeType, data: massing.data } });
+  }
+  if (styleImg) {
+    parts.push({ text: `ẢNH PHONG CÁCH ĐÃ CHỐT — đây là CÙNG ngôi nhà gia chủ đã duyệt. BẮT BUỘC giữ y hệt: màu sơn, vật liệu ốp, kiểu cửa, khung cửa, lan can, mái, đèn, cây xanh, ánh sáng. ${view === "interior" ? "Nội thất phải cùng tông màu và vật liệu với ngoại thất này." : "Chỉ đổi góc nhìn theo khung 3D."}` });
+    parts.push({ inlineData: { mimeType: styleImg.mimeType, data: styleImg.data } });
   }
   refs.forEach((r: any, k: number) => {
     parts.push({ text: `ẢNH THAM CHIẾU ${k + 1} CỦA GIA CHỦ — lấy theo phong cách, vật liệu, màu sắc, chi tiết mặt tiền. KHÔNG sao chép hình khối của ảnh này nếu khác khung 3D.` });
@@ -2140,7 +2388,7 @@ app.post("/api/generate-concept-image", async (req, res) => {
   const isInterior = view === "interior";
   void optionType;
   const constructPrompt = `
-Bạn là kiến trúc sư diễn họa. Vẽ 1 ảnh phối cảnh ${isInterior ? `NỘI THẤT ${loai_phong || "phòng khách"}` : "NGOẠI THẤT mặt tiền"} chân thực (photorealistic) cho đúng ngôi nhà dưới đây tại Việt Nam.
+Bạn là kiến trúc sư diễn họa. Vẽ 1 ảnh phối cảnh ${isInterior ? `NỘI THẤT ${loai_phong || "phòng khách"}` : `NGOẠI THẤT — góc nhìn: ${shotLabel || "mặt tiền"}`} chân thực (photorealistic) cho đúng ngôi nhà dưới đây tại Việt Nam.
 THÔNG TIN CÔNG TRÌNH (do gia chủ nhập/xác nhận — phải tuân theo):
 ${String(prompt).slice(0, 2500)}
 PHONG CÁCH: ${style || "theo mô tả của gia chủ"}${refs.length ? " — bám sát các ảnh tham chiếu của gia chủ" : ""}.
@@ -2170,7 +2418,9 @@ QUY TẮC:
       }
     }
     if (!imageUrl) throw new Error("AI không trả về ảnh");
-    res.json({ imageUrl, used: { massing: !!massing, references: refs.length } });
+    const nowUsed = isAdm ? used : used + 1;
+    if (!isAdm) await setRenderUsed(String(clientId || ""), nowUsed);
+    res.json({ imageUrl, used: { massing: !!massing, references: refs.length, style: !!styleImg }, quota: isAdm ? undefined : { used: nowUsed, limit: renderLimit } });
   } catch (error: any) {
     const msg = String(error?.message || error);
     console.warn("Concept Image Gen Notice:", msg);
@@ -2644,67 +2894,90 @@ app.post("/api/client-documents", async (req, res) => {
   }
 });
 
-// CTV Commissions API
-app.get("/api/commissions", adminAuthMiddleware, async (req, res) => {
-  try {
-    const list = Array.from(inMemoryStore.commissions.values());
-    res.json(list);
-  } catch (err: any) {
-    console.error("Error getting commissions:", err);
-    res.status(500).json({ error: err.message || "Failed to get commissions" });
-  }
+// CTV Commissions API — lưu Firestore (không mất khi máy chủ khởi động lại)
+app.get("/api/commissions", adminAuthMiddleware, async (_req, res) => {
+  try { res.json(await listCommissions()); }
+  catch (err: any) { res.status(500).json({ error: err.message || "Failed to get commissions" }); }
 });
 
+const COMMISSION_STATUS = new Set(["Chờ duyệt", "Cần duyệt thủ công", "Đã duyệt", "Đã thanh toán", "Hủy"]);
 app.post("/api/commissions", adminAuthMiddleware, async (req, res) => {
   try {
-    const comData = req.body;
-    if (!comData || !comData.id) {
-      return res.status(400).json({ error: "Missing commission id" });
-    }
-    inMemoryStore.commissions.set(comData.id, {
-      ...comData,
-      updatedAt: new Date().toISOString()
-    });
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("Error saving commission:", err);
-    res.status(500).json({ error: err.message || "Failed to save commission" });
-  }
+    const c = req.body || {};
+    if (!c.id) return res.status(400).json({ error: "Missing commission id" });
+    const old = inMemoryStore.commissions.get(c.id) || {};
+    const next: any = { ...old, ...c };
+    if (c.status !== undefined && !COMMISSION_STATUS.has(c.status)) return res.status(400).json({ error: "Trạng thái không hợp lệ" });
+    if (c.status === "Đã thanh toán" && old.status !== "Đã thanh toán") next.paidAt = new Date().toISOString();
+    if (c.amount !== undefined) next.amount = Math.max(0, Math.round(Number(c.amount) || 0));
+    await saveCommission(next);
+    if (c.status && getGasUrl()) forwardToGas({ type: "update_commission_status", ma_don: c.id, trang_thai: c.status }).catch(() => {});
+    res.json({ success: true, commission: next });
+  } catch (err: any) { res.status(500).json({ error: err.message || "Failed to save commission" }); }
 });
 
-// CTV Partners API
-app.get("/api/ctv-partners", adminAuthMiddleware, async (req, res) => {
+// CTV Partners API — lưu Firestore
+app.get("/api/ctv-partners", adminAuthMiddleware, async (_req, res) => {
   try {
-    const list = Array.from(inMemoryStore.ctvPartners.values());
-    res.json(list);
-  } catch (err: any) {
-    console.error("Error getting ctvPartners:", err);
-    res.status(500).json({ error: err.message || "Failed to get ctvPartners" });
-  }
+    const list = await listPartners();
+    res.json(list.map(p => ({ ...p, pinSet: !!p.pin, pin: undefined, effectiveRates: Object.fromEntries(CTV_PRODUCTS.map(k => [k, partnerRate(p, k)])) })));
+  } catch (err: any) { res.status(500).json({ error: err.message || "Failed to get ctvPartners" }); }
 });
 
 app.post("/api/ctv-partners", adminAuthMiddleware, async (req, res) => {
   try {
-    const partnerData = req.body;
-    if (!partnerData || !partnerData.ma_ctv) {
-      return res.status(400).json({ error: "Missing ma_ctv" });
+    const p = req.body || {};
+    const code = normCode(p.ma_ctv);
+    if (!code || !/^[A-Z0-9_-]{2,20}$/.test(code)) return res.status(400).json({ error: "Mã CTV chỉ gồm chữ / số, 2–20 ký tự" });
+    const data: any = { ma_ctv: code };
+    ["ten", "sdt", "ghi_chu"].forEach(k => { if (p[k] !== undefined) data[k] = String(p[k]).slice(0, 120); });
+    if (p.loai_doi_tac !== undefined) data.loai_doi_tac = ["CTV Thường", "B2B Đối Tác", "B2B VIP"].includes(p.loai_doi_tac) ? p.loai_doi_tac : "CTV Thường";
+    if (p.hh_thoa_thuan !== undefined) data.hh_thoa_thuan = Math.max(0, Math.min(100, Number(p.hh_thoa_thuan) || 0));
+    if (p.active !== undefined) data.active = !!p.active;
+    if (p.rates && typeof p.rates === "object") {
+      data.rates = {};
+      CTV_PRODUCTS.forEach(k => { const v = p.rates[k]; if (v !== undefined && v !== "" && v !== null && isFinite(Number(v))) data.rates[k] = Math.max(0, Math.min(100, Number(v))); });
     }
-    const docId = partnerData.id || partnerData.ma_ctv;
-    inMemoryStore.ctvPartners.set(docId, {
-      ...partnerData,
-      updatedAt: new Date().toISOString()
+    if (p.pin !== undefined && String(p.pin).trim()) data.pin = String(p.pin).trim().slice(0, 12);
+    const old = await getPartner(code);
+    if (!old) { data.createdAt = new Date().toISOString(); if (data.loai_doi_tac === undefined) data.loai_doi_tac = ctvTypeOf(code); if (data.active === undefined) data.active = true; }
+    const saved = await savePartner({ ...(old || {}), ...data, ...(data.rates ? { rates: data.rates } : {}) });
+    res.json({ success: true, partner: { ...saved, pin: undefined, pinSet: !!saved.pin } });
+  } catch (err: any) { res.status(500).json({ error: err.message || "Failed to save ctvPartner" }); }
+});
+
+// Cổng CTV: CTV tự xem khách & hoa hồng của mình (mã CTV + mã PIN do admin cấp)
+app.post("/api/ctv/me", async (req, res) => {
+  const ip = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").toString().split(",")[0].trim();
+  try {
+    const limit = await checkRateLimit(ip);
+    if (limit.blocked) return res.status(429).json({ ok: false, error: "Nhập sai quá nhiều lần, thử lại sau 15 phút" });
+    const code = normCode(req.body?.code), pin = String(req.body?.pin || "").trim();
+    const p = code ? await getPartner(code) : null;
+    if (!p || !p.pin || p.pin !== pin || p.active === false) { await recordFailedAttempt(ip); return res.status(401).json({ ok: false, error: "Sai mã CTV hoặc mã PIN (hoặc CTV chưa được admin cấp PIN)" }); }
+    recordSuccessfulAttempt(ip).catch(() => {});
+    const mask = (n: string) => { const w = String(n || "").trim().split(/\s+/); return w.length ? `${w[w.length - 1]} ${"*".repeat(3)}` : "Khách"; };
+    const leads = (await getLeads()).filter(l => leadCtvCode(l) === code);
+    const coms = (await listCommissions()).filter(c => normCode(c.ma_ctv || c.refCode) === code && c.status !== "Hủy");
+    const sum = (f: (c: any) => boolean) => coms.filter(f).reduce((a, c) => a + (Number(c.amount) || 0), 0);
+    res.json({
+      ok: true, ma_ctv: code, ten: p.ten || "", loai: p.loai_doi_tac || ctvTypeOf(code),
+      rates: Object.fromEntries(CTV_PRODUCTS.map(k => [CTV_PRODUCT_LABEL[k], partnerRate(p, k)])),
+      so_khach: leads.length,
+      khach: await Promise.all(leads.slice(0, 100).map(async l => ({ ngay: l.createdAt, ten: mask(l.userInfo?.name), goi: GOI_LABEL[await getVerifiedPackage(String(l.id)).catch(() => labelToGoi(l.goi_mua || ""))] }))),
+      hoa_hong: coms.map(c => ({ ngay: c.createdAt, khach: mask(c.customerName), san_pham: c.productLabel || c.product, doanh_thu: c.revenue, ty_le: c.rate, so_tien: c.amount, trang_thai: c.status })),
+      tong: sum(() => true), da_tra: sum(c => c.status === "Đã thanh toán"), cho_tra: sum(c => c.status !== "Đã thanh toán")
     });
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("Error saving ctvPartner:", err);
-    res.status(500).json({ error: err.message || "Failed to save ctvPartner" });
-  }
+  } catch (err: any) { res.status(500).json({ ok: false, error: err.message || "CTV portal failed" }); }
 });
 
 // Video Orders API
 app.get("/api/video-orders", adminAuthMiddleware, async (req, res) => {
   try {
-    const list = Array.from(inMemoryStore.videoOrders.values());
+    if (firestoreDb) {
+      try { const snap: any = await withTimeout(firestoreDb.collection("videoOrders").get(), 5000); snap.docs.forEach((d: any) => inMemoryStore.videoOrders.set(d.id, { id: d.id, ...d.data() })); } catch (e: any) { console.warn("[video] read:", e?.message || e); }
+    }
+    const list = Array.from(inMemoryStore.videoOrders.values()).sort((a: any, b: any) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     res.json(list);
   } catch (err: any) {
     console.error("Error getting videoOrders:", err);
@@ -2718,11 +2991,24 @@ app.post("/api/video-orders", async (req, res) => {
     if (!orderData || !orderData.id) {
       return res.status(400).json({ error: "Missing order id" });
     }
-    inMemoryStore.videoOrders.set(orderData.id, {
-      ...orderData,
-      updatedAt: new Date().toISOString()
-    });
-    res.json({ success: true });
+    const admin = isAdminRequest(req);
+    const old = inMemoryStore.videoOrders.get(orderData.id) || {};
+    // khách chỉ được tạo / cập nhật đơn của mình, không tự đổi trạng thái hay gắn link
+    const data = admin ? { ...old, ...orderData } : { ...orderData, status: old.status || (orderData.status === "Cần duyệt thủ công" ? orderData.status : "PENDING"), link: old.link || "", videoUrl: old.videoUrl || "" };
+    data.updatedAt = new Date().toISOString();
+    inMemoryStore.videoOrders.set(orderData.id, data);
+    if (firestoreDb) { try { await withTimeout(firestoreDb.collection("videoOrders").doc(String(orderData.id)).set(data, { merge: true }), 5000); } catch (e: any) { console.warn("[video] write:", e?.message || e); } }
+    let commission: any = null;
+    if (admin) {
+      const done = /COMPLET|HOÀN THÀNH|XONG/i.test(String(data.status || ""));
+      const clientId = String(data.customerId || data.projectId || "").trim();
+      const link = String(data.link || data.videoUrl || "").trim();
+      // gắn link video vào hồ sơ khách trên máy chủ → khách thấy nút "Xem video" trên mọi máy
+      if (clientId && link && firestoreDb) { try { await withTimeout(firestoreDb.collection("leads").doc(clientId).set({ link_video_phoi_canh: link, videoStatus: "COMPLETED" }, { merge: true }), 5000); } catch { /* bỏ qua */ } }
+      if (clientId && link) { const l = inMemoryStore.leads.get(clientId); if (l) inMemoryStore.leads.set(clientId, { ...l, link_video_phoi_canh: link }); }
+      if (done && clientId && Number(data.price) > 0) { try { commission = await recordCommission({ clientId, product: String(data.packageId || ""), amount: Number(data.price) }); } catch { /* bỏ qua */ } }
+    }
+    res.json({ success: true, commission });
   } catch (err: any) {
     console.error("Error saving videoOrder:", err);
     res.status(500).json({ error: err.message || "Failed to save videoOrder" });
