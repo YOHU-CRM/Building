@@ -32,6 +32,9 @@ export interface ComprehensiveEstimate {
     unit: string;
     unitPrice: string;
     totalAmount: string;
+    material: string;
+    labor: string;
+    spec: string;
   }>;
   timelinePhases: Array<{
     phase: string;
@@ -124,7 +127,10 @@ export function generateComprehensiveEstimate(
     volume: String(line.quantity),
     unit: line.item.unit,
     unitPrice: line.formattedUnitPrice,
-    totalAmount: line.formattedTotalAmount
+    totalAmount: line.formattedTotalAmount,
+    material: `${Math.round(line.materialAmount || 0).toLocaleString('vi-VN')} đ`,
+    labor: `${Math.round(line.laborAmount || 0).toLocaleString('vi-VN')} đ`,
+    spec: line.spec || ''
   }));
 
   // 5. Tiến độ thi công thực tế (5 giai đoạn)

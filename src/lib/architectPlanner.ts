@@ -76,6 +76,8 @@ export interface FloorPlanResult {
   lot?: { x: number; y: number; w: number; h: number };            // ranh đất (toạ độ nhà)
   paths?: { pts: [number, number][]; label: string; color: string }[]; // lối vào, lối ra bếp phụ
   road?: { side: Side; label: string };
+  advice?: string[];          // đề xuất của KTS (tư vấn) — tách khỏi bố trí theo ý gia chủ
+  adviceApplied?: boolean;
 }
 
 export interface PlannerInput {

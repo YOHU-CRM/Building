@@ -135,6 +135,9 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   const floor = clamp(Math.round(Number(input.floor) || 1), 1, floors);
   const fs = input.fengShuiAnalysis;
   const sketchNotes: string[] = [];
+  // Mặc định VẼ ĐÚNG Ý GIA CHỦ; đề xuất của KTS ghi riêng (advice). Khách bấm "Theo đề xuất KTS" thì mới áp vào bản vẽ.
+  const applyAdvice = !!input.rooms?.applyAdvice;
+  const advice: string[] = [];
   const checks: PlanCheck[] = [];
   const notes: string[] = [];
 
@@ -312,7 +315,7 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
       const cx = cands.sort((a, b) => sc(b) - sc(a))[0];
       if (cuaChinh && fsAt(fsBest) > fsAt(cx) && hasFs) {
         const c2 = cellOf(fsBest, 0.1);
-        notes.push(`Tùy chọn: dời cửa chính sang phía ${fsBest < cx ? 'trái' : 'phải'} (cung ${cellDir(c2.col, c2.row)}${info(cellDir(c2.col, c2.row)).star ? ' – ' + info(cellDir(c2.col, c2.row)).star : ''}) sẽ hợp tuổi hơn.`);
+        advice.push(`Dời cửa chính sang phía ${fsBest < cx ? 'trái' : 'phải'} (cung ${cellDir(c2.col, c2.row)}${info(cellDir(c2.col, c2.row)).star ? ' – ' + info(cellDir(c2.col, c2.row)).star : ''}) sẽ hợp tuổi hơn.`);
       }
       mainDoor = addDoor(mainRoom, seg, cx, dw, { main: true });
       const p = doorPoint(mainRoom, mainDoor);
@@ -380,17 +383,21 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     }).filter(Boolean).sort((a: any, b: any) => a.pen - b.pen)[0] as any;
     if (!carve) return;
     const { P, sd, strip } = carve;
+    const lobbyTxt = `Thêm sảnh đệm 1,2m (lấy từ ${P.name}) trước ${wc.name}: cửa WC không mở thẳng ra ${P.type === 'kitchen' ? 'bếp' : P.type === 'dining' ? 'bàn ăn' : P.name}, cả nhà đi WC không qua phòng ngủ.`;
+    if (!applyAdvice) { advice.push(lobbyTxt); return; }
     if (sd === 'left') { P.x = r1(P.x + 1.2); P.w = r1(P.w - 1.2); }
     else if (sd === 'right') { P.w = r1(P.w - 1.2); }
     else if (sd === 'front') { P.y = r1(P.y + 1.2); P.h = r1(P.h - 1.2); }
     else { P.h = r1(P.h - 1.2); }
     rooms.push({ id: `lobby_${wc.id}`, type: 'corridor', name: 'Sảnh đệm WC', x: r1(strip.x), y: r1(strip.y), w: r1(strip.w), h: r1(strip.h), doors: [], windows: [], items: [] });
-    sketchNotes.push(`↺ Thêm sảnh đệm 1,2m (lấy từ ${P.name}) trước ${wc.name}: cửa WC không mở thẳng ra ${P.type === 'kitchen' ? 'bếp' : P.type === 'dining' ? 'bàn ăn' : P.name}, cả nhà đi WC không qua phòng ngủ.`);
+    sketchNotes.push(`↺ Đã áp dụng đề xuất: ${lobbyTxt}`);
+    advice.push(lobbyTxt);
   });
 
   type SvcChoice = { owner: PlanRoom; seg: Seg; c: number; route: [number, number][]; pen: number; wc: WcChoice[] };
   let svc: SvcChoice | null = null;
   let sketchSvcPen: { pen: number; viaWc: boolean; ownerBad: boolean } | null = null;
+  let svcSketch: SvcChoice | null = null, svcOpt: SvcChoice | null = null;
   const svcCands: SvcChoice[] = [];
   const owners = needService && startRoom
     ? inside().filter(r => r === kitchen || r === dining || (r.type === 'corridor' && (!kitchen || shared(r, kitchen))))
@@ -441,6 +448,14 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
         sketchSvcPen = { pen: 0, viaWc, ownerBad: false };
       }
     }
+    // Cửa phụ ĐÚNG như gia chủ vẽ (phòng + phía) — dùng khi chưa bấm "Theo đề xuất KTS"
+    if (skSvcSide) {
+      const ownerList = skOwner && !skOwner.outside ? [skOwner] : owners;
+      const cands = ownerList.flatMap(o => isExteriorSeg(o, skSvcSide).map(seg => evalSvc(o, seg, r1((seg.a + seg.b) / 2))));
+      svcSketch = cands.sort((a, b) => a.pen - b.pen)[0] || null;
+    }
+    svcOpt = svc;
+    if (!applyAdvice && svcSketch) svc = svcSketch;
   }
   // gắn cửa WC theo phương án chọn (hoặc tốt nhất khi không có bếp phụ)
   const wcChosen: WcChoice[] = svc ? svc.wc : wcs.map(w => wcOptions(w, null)[0]).filter(Boolean);
@@ -448,8 +463,13 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     addDoor(ch.room, ch.seg, ch.c, 0.7);
     if (ch.to.type === 'bedroom' || ch.to.type === 'master') { ch.room.name = ch.room.name.match(/riêng/i) ? ch.room.name : `${ch.room.name} (riêng ${ch.to.name})`; }
     const toName = ch.to === ch.room ? 'ra ngoài' : `vào ${ch.to.name}`;
-    const bad = ch.to.type === 'kitchen' || ch.to.type === 'dining' || ch.to === mainRoom;
-    sketchNotes.push(`${bad ? '↺' : '✓'} Cửa ${ch.room.name.split(' (')[0]} mở ${toName}${bad ? ' — không còn vách nào khác, nên làm sảnh đệm / cửa lệch, luôn đóng' : ': không mở ra bếp, bàn ăn hay cửa chính'}${svc ? ', không nằm trên lối ra bếp phụ' : ''}.`);
+    const bad = ch.to.type === 'kitchen' || ch.to.type === 'dining' || ch.to === mainRoom || ((ch.to.type === 'bedroom' || ch.to.type === 'master') && wcs.length < 2);
+    if (bad) {
+      checks.push({ ok: false, text: `Cửa ${ch.room.name.split(' (')[0]} đang mở ${toName} (theo bố trí phác thảo) — xem mục TƯ VẤN KTS.` });
+      if (!advice.some(a => a.includes('sảnh đệm'))) advice.push(`Cửa ${ch.room.name.split(' (')[0]} đang mở ${toName}: nên làm sảnh đệm hoặc đổi vị trí WC để cửa WC không mở ra bếp, bàn ăn, phòng ngủ.`);
+    } else {
+      sketchNotes.push(`✓ Cửa ${ch.room.name.split(' (')[0]} mở ${toName}: không mở ra bếp, bàn ăn hay cửa chính${svc ? ', không nằm trên lối ra bếp phụ' : ''}.`);
+    }
   });
   if (svc) {
     const d = addDoor(svc.owner, svc.seg, svc.c, 0.9, { service: true });
@@ -461,12 +481,17 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
       return distPoly([p[0] + ox * 0.5, p[1] + oy * 0.5], svc!.route);
     })) : 99;
     const sideTxt = `tường ${SIDE_VI[svc.seg.side]} của ${svc.owner.name} (hướng ${sideBearing(svc.seg.side)})`;
-    if (sketchSvcPen && (sketchSvcPen.viaWc || sketchSvcPen.ownerBad)) {
-      sketchNotes.push(`↺ Lối ra bếp phụ trên phác thảo đi ngang trước cửa WC → chuyển cửa phụ ra ${sideTxt}: từ bếp đi thẳng ra, không qua WC.`);
-    } else if (skSvcSide && skSvcSide !== svc.seg.side) {
-      sketchNotes.push(`↺ Cửa phụ chuyển ra ${sideTxt} (phác thảo ở phía ${SIDE_VI[skSvcSide]}): lối đi ngắn hơn, tránh cửa WC, khói bếp củi không theo gió vào nhà.`);
+    const optTxt = svcOpt ? `tường ${SIDE_VI[svcOpt.seg.side]} của ${svcOpt.owner.name} (hướng ${sideBearing(svcOpt.seg.side)})` : '';
+    const sketchBad = !!sketchSvcPen && (sketchSvcPen.viaWc || sketchSvcPen.ownerBad);
+    const optDiffers = !!svcOpt && !!svcSketch && (svcOpt.owner !== svcSketch.owner || svcOpt.seg.side !== svcSketch.seg.side);
+    if (!applyAdvice && svcSketch) {
+      sketchNotes.push(`✓ Giữ cửa phụ ra bếp phụ ở ${sideTxt} như phác thảo.`);
+      if (optDiffers && (sketchBad || svcOpt!.pen < svcSketch.pen - 3)) advice.push(`Chuyển cửa phụ ra ${optTxt}${sketchBad ? ': lối từ bếp ra bếp phụ hiện đi ngang trước cửa WC' : ': lối đi ngắn hơn'}; đề xuất đi thẳng từ bếp ra, không qua WC, khói bếp củi không theo gió vào nhà.`);
+    } else if (applyAdvice && optDiffers) {
+      sketchNotes.push(`↺ Đã áp dụng đề xuất: cửa phụ chuyển ra ${sideTxt}${sketchBad ? ' (phác thảo đi ngang trước cửa WC)' : ''}.`);
+      advice.push(`Cửa phụ chuyển ra ${sideTxt}: từ bếp đi thẳng ra bếp phụ, không qua trước cửa WC.`);
     } else {
-      sketchNotes.push(`✓ Cửa phụ ra bếp phụ ở ${sideTxt} như phác thảo.`);
+      sketchNotes.push(`✓ Cửa phụ ra bếp phụ ở ${sideTxt}${skSvcSide ? ' như phác thảo' : ' (phác thảo chưa vẽ cửa phụ — tool chọn chỗ tốt nhất)'}.`);
     }
     checks.push({ ok: wcDist >= 1.4, text: wcDist >= 1.4 ? `Lối ra bếp phụ không đi qua trước cửa WC (cách ${r1(wcDist)}m) ✓` : `Lối ra bếp phụ còn gần cửa WC (${r1(wcDist)}m) — nên làm vách ngăn che cửa WC.` });
     const wp = windPen(svc.seg.side);
@@ -796,7 +821,8 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     rooms, grid, checks, fengShuiNotes: notes, sketchNotes,
     density: { lotArea, footprint, pct, maxPct },
     bedroomsThisFloor: totalBeds, totalBedroomsPlaced: totalBeds, totalBedroomsRequested: totalBeds,
-    mode: 'free', lot, paths, road: { side: roadSide, label: 'ĐƯỜNG VÀO' }
+    mode: 'free', lot, paths, road: { side: roadSide, label: 'ĐƯỜNG VÀO' },
+    advice, adviceApplied: applyAdvice
   };
 }
 

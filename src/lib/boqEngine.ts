@@ -21,7 +21,7 @@ export type FinishingPackageKey = 'tiet_kiem' | 'tieu_chuan' | 'cao_cap';
  * 1.00 = giữ nguyên bảng đơn giá gốc. Ví dụ 1.15 = tăng tất cả 15%.
  * Đội dự toán Yohu rà giá thị trường rồi chỉnh số này (màn hình, PDF, CRM cùng đổi).
  */
-export const MARKET_CALIBRATION = 1.0;
+export const MARKET_CALIBRATION = 1.15; // tạm tăng 15% (14/10/2026) — chờ đội dự toán rà lại
 
 export const REGIONAL_FACTORS: Record<RegionKey, { name: string; factor: number }> = {
   mien_bac: { name: 'Miền Bắc', factor: 1.0 },
@@ -148,7 +148,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       cao_cap: 'Thép hình nhập khẩu SS400/Q345B mạ kẽm nhúng nóng hoặc sơn phủ chống cháy 60 phút'
     },
     technicalNote: 'Khung thép liên kết bản mã bu-lông cường độ cao cấp bền 8.8',
-    clientExplanation: 'Khung thép siêu bền, thi công lắp ráp thần tốc trong vài ngày'
+    clientExplanation: 'Khung thép chịu lực tốt, lắp dựng nhanh hơn đổ bê tông tại chỗ'
   },
 
   // 5. KC_PANEL_EPS (PA2: Khung Thép Tiền Chế)
@@ -220,7 +220,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       cao_cap: 'Xi măng Holcim/Insee PCB40, hạt EPS nguyên sinh tỷ trọng cao chống cháy lan, cát thạch anh'
     },
     technicalNote: 'Bê tông hạt xốp EPS đúc liền khối nguyên khối không mạch ngừng, cách âm >45dB, mát hơn 4-6°C',
-    clientExplanation: 'Vách đúc nguyên khối chống ồn, chống nóng vượt trội và chống nồm ẩm tuyệt đối'
+    clientExplanation: 'Vách đúc nguyên khối chống ồn, chống nóng vượt trội và hạn chế nồm ẩm'
   },
 
   // 8. KC_COT_THEP (PA1 & PA3)
@@ -264,7 +264,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
     unitPrices: { tiet_kiem: 162000, tieu_chuan: 185000, cao_cap: 215000 },
     specs: {
       tiet_kiem: 'Tấm xi măng Duralex/BKT 8mm sản xuất trong nước',
-      tieu_chuan: 'Tấm SCG Smartboard Thái Lan 8mm chịu ẩm, kháng nước tuyệt đối',
+      tieu_chuan: 'Tấm SCG Smartboard Thái Lan 8mm chịu ẩm, chịu nước tốt',
       cao_cap: 'Tấm Duraflex Vĩnh Tường 9mm sợi cellulose tự nhiên tiêu chuẩn xanh'
     },
     technicalNote: 'Bắn vít liên kết khung xương dẫn hướng, chống rỗ bề mặt khi bơm vữa nhẹ',
@@ -289,7 +289,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
     specs: {
       tiet_kiem: 'Phụ gia hóa dẻo nội địa đạt ASTM C494 Type A, hỗ trợ tháo gông 48h',
       tieu_chuan: 'Sika ViscoCrete-3000 + Sikament R7 đông kết nhanh 24h, tháo gông định hình an toàn',
-      cao_cap: 'Grace ADVA cao cấp nhập khẩu Thụy Sỹ, tự lèn tuyệt đối, chống thấm thẩm thấu tinh thể'
+      cao_cap: 'Grace ADVA cao cấp nhập khẩu Thụy Sỹ, tự lèn tốt, chống thấm thẩm thấu tinh thể'
     },
     technicalNote: 'Phụ gia hóa dẻo giúp bê tông EPS tự chảy lèn kín mọi ngóc ngách không cần đầm dùi',
     clientExplanation: 'Giúp vách đạt cường độ nhanh, tháo dỡ gông sau 24h để hoàn thiện siêu tốc'
@@ -313,7 +313,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       cao_cap: 'Hệ Gông hợp kim nhôm định hình cao cấp CNC sai số dưới 1mm, bề mặt láng mịn'
     },
     technicalNote: 'Hệ gông khóa phẳng 2 mặt vách, chịu áp lực vữa bơm không bị phình cong',
-    clientExplanation: 'Bộ khuôn gông cơ khí bản quyền đảm bảo vách thẳng đứng 100% không xô lệch'
+    clientExplanation: 'Bộ khuôn gông cơ khí bản quyền giữ vách thẳng đứng, hạn chế xô lệch khi đổ'
   },
 
   // 12. NC_LAP_DUNG_EPS (PA3)
@@ -333,7 +333,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
     unitPrices: { tiet_kiem: 820000, tieu_chuan: 920000, cao_cap: 1050000 },
     specs: {
       tiet_kiem: 'Đội thợ thi công theo quy trình phổ thông, giám sát bán thời gian',
-      tieu_chuan: 'Tổ thợ chuyên nghiệp được YOHU cấp chứng chỉ vận hành máy bơm & gông 3D, kỹ sư giám sát 100%',
+      tieu_chuan: 'Tổ thợ chuyên nghiệp được YOHU cấp chứng chỉ vận hành máy bơm & gông 3D, kỹ sư giám sát thường xuyên',
       cao_cap: 'Đội ngũ nghệ nhân thi công cao cấp, giám sát trưởng túc trực 24/7, nghiệm thu laser 3D'
     },
     technicalNote: 'Đội thợ đào tạo kỹ thuật đúc liền khối và căn chỉnh nivo laser chuẩn xác',
@@ -361,7 +361,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       cao_cap: 'Dây điện Cadivi ruột đồng 99.99% vỏ XLPE chậm cháy, ống cấp PPR Vesbo/Rehau Đức kháng khuẩn'
     },
     technicalNote: 'Phân tách lộ dây đôi chịu tải và dây đơn chiếu sáng, test áp lực nước 10 bar trước khi đóng vách',
-    clientExplanation: 'Đường điện nước âm thẩm mỹ, an toàn tuyệt đối chống chập cháy và rò rỉ nước'
+    clientExplanation: 'Đường điện nước âm thẩm mỹ, đi trong ống bảo vệ, giảm nguy cơ chập cháy và rò rỉ'
   },
 
   // 14. HT_MAI (All Options)
@@ -486,7 +486,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       tieu_chuan: 'Bệt liền khối Inax nắp êm, vòi sen tắm cây đứng Inax đồng thau mạ niken-crom 3 lớp, chậu lavabo âm bàn',
       cao_cap: 'Trọn bộ thiết bị Toto/Kohler cao cấp, bệt thông minh nắp điện tử, sen tắm điều nhiệt massage'
     },
-    technicalNote: 'Phụ kiện van khóa đồng, xiphong thoát nước ngăn mùi hôi 100%',
+    technicalNote: 'Phụ kiện van khóa đồng, xiphong thoát nước ngăn mùi hôi',
     clientExplanation: 'Trọn bộ thiết bị vệ sinh sang trọng, men sứ Aqua Ceramic chống bám bẩn'
   },
 
@@ -508,7 +508,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
       cao_cap: 'Hệ thống chiếu sáng thông minh Philips Hue/Schneider, công tắc cảm ứng mặt kính SmartHome điều khiển qua điện thoại'
     },
     technicalNote: 'Thiết bị bảo vệ Aptomat chống giật RCBO Panasonic cho từng tầng và từng lộ ẩm ướt',
-    clientExplanation: 'Hệ thống đèn LED tiết kiệm điện năng và công tắc an toàn tuyệt đối cho gia đình'
+    clientExplanation: 'Hệ thống đèn LED tiết kiệm điện năng và công tắc ổ cắm an toàn cho gia đình'
   },
 
   // 20. HT_TRAN (All Options)
@@ -520,9 +520,9 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
     unit: 'm²',
     options: ['PA1', 'PA2', 'PA3'],
     laborRatio: 0.30,
-    formulaDescription: '= diện tích xây dựng × 1,0 m²',
-    computeQuantity: ({ dien_tich_xay_dung }) => {
-      const q = Math.round(dien_tich_xay_dung);
+    formulaDescription: '= diện tích sàn các tầng × 0,9 (trừ ô thang, giếng trời, ban công)',
+    computeQuantity: ({ dien_tich_san }) => {
+      const q = Math.round(dien_tich_san * 0.9);
       return { quantity: q, formattedQuantity: `${q} m²` };
     },
     unitPrices: { tiet_kiem: 135000, tieu_chuan: 175000, cao_cap: 285000 },
@@ -550,7 +550,7 @@ export const MASTER_BOQ_ITEMS: MasterBOQItemDef[] = [
     specs: {
       tiet_kiem: 'Tủ bếp nhôm kính Omega/MDF phủ melamine chống ẩm, đá đen Huế',
       tieu_chuan: 'Tủ bếp MDF lõi xanh chống ẩm An Cường phủ Acrylic bóng gương, đá Granite bàn bếp, chậu đúc Inox 304 2 hố',
-      cao_cap: 'Tủ bếp hợp kim nhôm cánh kính cường lực siêu bền không mối mọt trọn đời, phụ kiện Hafele/Blum giảm chấn tự động'
+      cao_cap: 'Tủ bếp hợp kim nhôm cánh kính cường lực bền, không mối mọt, phụ kiện Hafele/Blum giảm chấn tự động'
     },
     technicalNote: 'Phụ kiện bản lề giảm chấn inox 304 chống rỉ sét trong môi trường ẩm mặn',
     clientExplanation: 'Gian bếp tiện nghi, ngăn nắp, bề mặt đá bền chắc dễ lau chùi dầu mỡ'
@@ -611,6 +611,7 @@ export interface BOQCalculatedLine {
   materialAmount?: number;
   laborAmount?: number;
   spec: string;
+  yeuCau?: string[];          // yêu cầu gia chủ đã áp vào dòng này
 }
 
 export interface FullProjectEstimateResult {
@@ -671,6 +672,81 @@ export interface FullProjectEstimateResult {
 }
 
 export type RoofKind = 'ton' | 'ngoi' | 'btct' | 'thai_nhat';
+
+/** Lựa chọn vật tư / kỹ thuật gia chủ chọn ở Bước B (StructuralOptionsSection) */
+export interface CustomerChoices {
+  mac_be_tong?: string; mac_thep?: string; loai_gach?: string; bien_phap_cop_pha?: string;
+  ty_trong_eps?: string; do_day_vach_eps?: string; loai_san?: string; loai_vach?: string;
+  thep_hop_cot?: string; loai_mai?: string;
+}
+export const CHOICE_LABEL: Record<keyof CustomerChoices | 'loai_tran', string> = {
+  mac_be_tong: 'Mác bê tông', mac_thep: 'Mác thép', loai_gach: 'Gạch xây', bien_phap_cop_pha: 'Cốp pha',
+  ty_trong_eps: 'Tỷ trọng bê tông EPS', do_day_vach_eps: 'Độ dày vách EPS', loai_san: 'Loại sàn', loai_vach: 'Loại vách',
+  thep_hop_cot: 'Thép hộp cột', loai_mai: 'Loại mái', loai_tran: 'Loại trần'
+};
+/** Dòng dự toán chịu ảnh hưởng của từng lựa chọn */
+const CHOICE_TARGET: Record<keyof CustomerChoices, string[]> = {
+  mac_be_tong: ['KC_MONG_BTCT', 'KC_KHUNG_BTCT'], mac_thep: ['KC_MONG_BTCT', 'KC_COT_THEP'], loai_gach: ['KC_XAY_TO_GACH'],
+  bien_phap_cop_pha: ['KC_KHUNG_BTCT'], ty_trong_eps: ['KC_BETONG_EPS'], do_day_vach_eps: ['KC_BETONG_EPS'],
+  loai_san: ['KC_CEMBOARD'], loai_vach: ['KC_PANEL_EPS'], thep_hop_cot: ['KC_KHUNG_THEP_TC'], loai_mai: ['HT_MAI']
+};
+
+/** Ghi lựa chọn của gia chủ vào TÊN + QUY CÁCH (và khối lượng nếu lựa chọn làm đổi khối lượng) của đúng dòng dự toán.
+ *  Thay đúng chữ trong quy cách gốc (vd "mác 250" → "M300") để không còn mâu thuẫn với yêu cầu của gia chủ. */
+function applyChoices(item: MasterBOQItemDef, spec0: string, quantity: number, formattedQuantity: string, yc?: CustomerChoices, loaiTran?: string) {
+  let spec = spec0, q = quantity, fq = formattedQuantity;
+  const applied: string[] = [];
+  if (item.id === 'HT_TRAN' && loaiTran && String(loaiTran).trim()) applied.push(`${CHOICE_LABEL.loai_tran}: ${String(loaiTran).trim()}`);
+  if (!yc) return { spec, quantity: q, formattedQuantity: fq, applied };
+  const MAC = /(?:bê tông\s*(?:thương phẩm\s*)?)?mác\s*\d{3}(?:\s*\/\s*\d{3})?|\bM\d{3}(?:\s*\/\s*M?\d{3})?/gi;
+  (Object.keys(CHOICE_TARGET) as (keyof CustomerChoices)[]).forEach(k => {
+    const v = String(yc[k] ?? '').trim();
+    if (!v || /^khác/i.test(v) || !CHOICE_TARGET[k].includes(item.id)) return;
+    if (k === 'loai_mai') return;   // mái: đã đổi đơn giá & tên dòng theo loại mái
+    switch (k) {
+      case 'mac_be_tong': {
+        const m = (v.match(/\bM\s?\d{3}\b|\bB\d{2}\b/i) || [v])[0].replace(/\s/g, '');
+        const rep = `bê tông ${m}`;
+        if (MAC.test(spec)) spec = spec.replace(MAC, rep); else spec = `${rep.charAt(0).toUpperCase() + rep.slice(1)}; ${spec}`;
+        item.name = item.name.replace(MAC, m);
+        break;
+      }
+      case 'mac_thep': {
+        const STEEL = /CB\s?\d{3}(?:-?V)?(?:\s*\/\s*CB\s?\d{3}(?:-?V)?)?/gi;
+        if (STEEL.test(spec)) spec = spec.replace(STEEL, v); else spec = `Thép ${v}; ${spec}`;
+        break;
+      }
+      case 'loai_gach':
+        item.name = `Xây tường ${v.charAt(0).toLowerCase() + v.slice(1)} & trát vữa xi măng mác 75 hai mặt`;
+        spec = `${v}; vữa xi măng mác 75 cát vàng sàng sạch, trát 2 mặt dày 1,5cm`;
+        break;
+      case 'bien_phap_cop_pha':
+        spec = /cốp pha[^,;.]*/i.test(spec) ? spec.replace(/cốp pha[^,;.]*/i, v) : `${spec}; ${v}`;
+        item.name = item.name.replace(/Cốp pha.*$/i, v);
+        break;
+      case 'loai_vach':
+        if (/panel\s*eps/i.test(item.name) || /panel\s*eps/i.test(spec)) { item.name = item.name.replace(/Panel EPS/gi, v); spec = spec.replace(/Panel EPS/gi, v); }
+        else spec = `${v}; ${spec}`;
+        break;
+      case 'loai_san': spec = `Sàn ${v}; ${spec}`; break;
+      case 'thep_hop_cot': spec = `Cột thép hộp ${v}; ${spec}`; break;
+      case 'ty_trong_eps': spec = `Tỷ trọng ${v}; ${spec}`; break;
+      case 'do_day_vach_eps': {
+        const mm = parseFloat(v.replace(',', '.'));
+        if (mm > 50 && mm < 400 && Math.abs(mm - 150) > 1) {
+          q = Math.round(quantity * mm / 150 * 10) / 10;          // khối lượng bê tông vách tỷ lệ độ dày (gốc 150mm)
+          fq = `${q} m³`;
+        }
+        spec = `Vách dày ${v}; ${spec}`;
+        break;
+      }
+    }
+    applied.push(`${CHOICE_LABEL[k]}: ${v}`);
+  });
+  if (applied.length && item.id !== 'HT_TRAN') spec = `${spec} (theo yêu cầu gia chủ)`;
+  spec = spec.charAt(0).toUpperCase() + spec.slice(1);
+  return { spec, quantity: q, formattedQuantity: fq, applied };
+}
 export interface FoundationDecision {
   soil: 'tot' | 'yeu' | 'cat' | 'chua_biet';
   foundation: 'bang' | 'coc' | 'be';
@@ -744,6 +820,7 @@ export function calculateMasterProjectEstimate(params: {
   roofType?: string;          // loại mái khách chọn / loại công trình (Tôn, Ngói, Mái Thái, Mái bằng...)
   widthM?: number;            // chiều rộng nhà (để ước số cột/đài cọc)
   houseLengthM?: number;      // chiều sâu nhà
+  yeuCau?: CustomerChoices;   // các lựa chọn vật tư / kỹ thuật gia chủ đã chọn
 }): FullProjectEstimateResult {
   const optionKey: StructuralOptionKey = params.optionKey || 'PA1';
   const packageKey: FinishingPackageKey = params.packageKey || 'tieu_chuan';
@@ -791,26 +868,37 @@ export function calculateMasterProjectEstimate(params: {
         if (raw.includes('than tre') || raw.includes('than_tre') || raw.includes('bamboo')) {
           item.name = 'Trần ốp tấm đa năng sợi than tre (Bamboo Charcoal) chống ẩm';
           item.unitPrices = { tiet_kiem: 280000, tieu_chuan: 380000, cao_cap: 550000 };
+          item.specs = { tiet_kiem: 'Tấm than tre dày 5mm, khung xương gỗ / thép hộp mạ kẽm', tieu_chuan: 'Tấm than tre dày 8mm vân gỗ/vân đá, khung xương thép hộp mạ kẽm, nẹp nhôm', cao_cap: 'Tấm than tre 8mm phủ PET bóng gương, nẹp nhôm định hình, đèn hắt LED' };
           item.clientExplanation = 'Trần ốp tấm sợi than tre cao cấp chống ẩm mốc, vân đá/vân gỗ sang trọng, cách âm và bền đẹp';
         } else if (raw.includes('nhom') || raw.includes('nhôm') || raw.includes('aluminum') || raw.includes('clip-in') || raw.includes('baffle')) {
-          item.name = 'Hệ trần nhôm hợp kim cao cấp (Clip-in / Baffle)';
+          item.name = 'Hệ trần nhôm hợp kim (Clip-in / Baffle)';
           item.unitPrices = { tiet_kiem: 320000, tieu_chuan: 420000, cao_cap: 620000 };
-          item.clientExplanation = 'Trần nhôm hợp kim sơn tĩnh điện chống oxy hóa, kháng ẩm 100%, phong cách hiện đại và bền vĩnh cửu';
+          item.specs = {
+            tiet_kiem: 'Tấm nhôm Clip-in 600×600 dày 0,5mm sơn tĩnh điện, khung xương chữ T mạ kẽm, ty treo D8',
+            tieu_chuan: 'Tấm nhôm Clip-in 600×600 dày 0,6mm hoặc Baffle U 30×100mm sơn tĩnh điện, khung xương Omega mạ kẽm, ty treo D8 a1200',
+            cao_cap: 'Trần nhôm Baffle / Linear dày 0,7–0,8mm vân gỗ chuyển nhiệt, khung xương chuyên dụng, phụ kiện đồng bộ hãng'
+          };
+          item.technicalNote = 'Khoảng treo trần 300–500mm cho điều hòa, đèn; chừa ô thăm kỹ thuật; tấm nhôm tháo lắp được để bảo trì.';
+          item.clientExplanation = 'Trần nhôm sơn tĩnh điện chống ẩm, không mối mọt, tháo lắp được để sửa điện nước, phong cách hiện đại';
         } else if (raw.includes('nano') || raw.includes('nhua') || raw.includes('nhựa') || raw.includes('pvc') || raw.includes('lam sóng') || raw.includes('lam song')) {
           item.name = 'Trần tấm nhựa Nano / Lam sóng phẳng nguyên sinh chống ẩm';
           item.unitPrices = { tiet_kiem: 180000, tieu_chuan: 250000, cao_cap: 350000 };
-          item.clientExplanation = 'Trần nhựa Nano PVC nguyên sinh chống thấm nước, không mối mọt, dễ lau chùi';
+          item.specs = { tiet_kiem: 'Tấm nhựa PVC Nano dày 8mm, khung xương thép hộp mạ kẽm', tieu_chuan: 'Tấm Nano / lam sóng dày 9–10mm vân gỗ, khung xương thép hộp mạ kẽm, nẹp góc', cao_cap: 'Lam sóng Nano cao cấp phủ film 3D, nẹp nhôm, đèn hắt LED' };
+          item.clientExplanation = 'Trần nhựa Nano PVC chịu nước, không mối mọt, dễ lau chùi';
         } else if (raw.includes('go') || raw.includes('gỗ') || raw.includes('wood')) {
           item.name = 'Trần ốp gỗ tự nhiên / gỗ công nghiệp chống ẩm cao cấp';
           item.unitPrices = { tiet_kiem: 350000, tieu_chuan: 550000, cao_cap: 950000 };
+          item.specs = { tiet_kiem: 'Gỗ công nghiệp MDF chống ẩm phủ melamine, khung xương gỗ', tieu_chuan: 'Gỗ công nghiệp An Cường chống ẩm phủ laminate, khung xương thép hộp', cao_cap: 'Gỗ tự nhiên (sồi/óc chó) sơn PU, khung xương thép hộp, đèn hắt' };
           item.clientExplanation = 'Trần gỗ cao cấp mang lại vẻ ấm cúng, sang trọng và nâng tầm đẳng cấp không gian';
         } else if (raw.includes('thach cao') || raw.includes('thạch cao') || raw.includes('gypsum')) {
           item.name = 'Trần thạch cao khung xương chìm Vĩnh Tường chống ẩm';
           item.unitPrices = { tiet_kiem: 165000, tieu_chuan: 215000, cao_cap: 295000 };
+          item.specs = { tiet_kiem: 'Khung xương chìm Vĩnh Tường, tấm Gyproc 9mm thường (khu ướt dùng tấm chịu ẩm)', tieu_chuan: 'Khung xương chìm Vĩnh Tường Basi, tấm Gyproc 9mm chịu ẩm, sơn bả hoàn thiện', cao_cap: 'Khung Vĩnh Tường Alpha, tấm chịu ẩm 12mm, giật cấp đèn hắt, sơn bả hoàn thiện' };
           item.clientExplanation = 'Trần thạch cao tấm chống ẩm Vĩnh Tường khung xương cao cấp sơn bả hoàn thiện';
         } else if (params.loai_tran.trim().length > 0 && params.loai_tran !== "Khác" && params.loai_tran !== "Khác (Tự nhập)") {
           item.name = `Trần hoàn thiện: ${params.loai_tran.trim()}`;
           item.unitPrices = { tiet_kiem: 220000, tieu_chuan: 320000, cao_cap: 480000 };
+          item.specs = { tiet_kiem: `${params.loai_tran.trim()} — vật tư phổ thông (đơn giá tạm tính, cần báo giá thực tế)`, tieu_chuan: `${params.loai_tran.trim()} — vật tư tiêu chuẩn (đơn giá tạm tính, cần báo giá thực tế)`, cao_cap: `${params.loai_tran.trim()} — vật tư cao cấp (đơn giá tạm tính, cần báo giá thực tế)` };
           item.clientExplanation = `Hệ trần hoàn thiện theo đúng yêu cầu gia chủ: ${params.loai_tran.trim()}`;
         }
       }
@@ -846,11 +934,13 @@ export function calculateMasterProjectEstimate(params: {
       });
 
       if (quantity <= 0) return;
+      const ch = applyChoices(item, item.specs[pkg], quantity, formattedQuantity, params.yeuCau, params.loai_tran);
+      const qty = ch.quantity;
 
       const baseUnitPrice = item.unitPrices[pkg];
       // Apply regional price factor
       const unitPrice = Math.round((baseUnitPrice * regionFactor * MARKET_CALIBRATION) / 100) * 100;
-      const totalAmount = Math.round(quantity * unitPrice);
+      const totalAmount = Math.round(qty * unitPrice);
 
       const laborRatio = item.laborRatio !== undefined ? item.laborRatio : 0.30;
       const itemLabor = Math.round(totalAmount * laborRatio);
@@ -862,16 +952,17 @@ export function calculateMasterProjectEstimate(params: {
 
       lines.push({
         item,
-        quantity,
-        formattedQuantity,
-        formattedQty: formattedQuantity,
+        quantity: qty,
+        formattedQuantity: ch.formattedQuantity,
+        formattedQty: ch.formattedQuantity,
         unitPrice,
         formattedUnitPrice: `${unitPrice.toLocaleString('vi-VN')} đ`,
         totalAmount,
         formattedTotalAmount: `${totalAmount.toLocaleString('vi-VN')} đ`,
         materialAmount: itemMaterial,
         laborAmount: itemLabor,
-        spec: item.specs[pkg]
+        spec: ch.spec,
+        yeuCau: ch.applied.length ? ch.applied : undefined
       });
     });
 

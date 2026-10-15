@@ -415,8 +415,10 @@ export async function exportSpecificationToPdf({
               <th style="width:190px;">Hạng Mục Vật Tư / Nhân Công</th>
               <th style="width:25px; text-align:center;">ĐVT</th>
               <th style="width:70px; text-align:right;">Khối Lượng</th>
-              <th style="width:65px; text-align:right;">Đơn Giá</th>
-              <th style="width:75px; text-align:right;">Thành Tiền</th>
+              <th style="width:60px; text-align:right;">Đơn Giá</th>
+              <th style="width:65px; text-align:right;">Vật Tư</th>
+              <th style="width:60px; text-align:right;">Nhân Công</th>
+              <th style="width:70px; text-align:right;">Thành Tiền</th>
               <th>Ghi Chú Kỹ Thuật / Chi Tiết Ứng Dụng</th>
             </tr>
           </thead>
@@ -424,10 +426,12 @@ export async function exportSpecificationToPdf({
             ${lines.map((line, idx) => `
               <tr>
                 <td class="col-num">${idx + 1}</td>
-                <td><b>${cleanAndNormalizeVietnameseText(line.item.name)}</b></td>
+                <td><b>${cleanAndNormalizeVietnameseText(line.item.name)}</b><br/><span style="font-size:6px; color:#475569;">${cleanAndNormalizeVietnameseText(line.spec || '')}</span></td>
                 <td style="text-align:center;">${line.item.unit}</td>
                 <td class="col-right" style="font-weight:600; color:#0f172a;">${line.formattedQuantity}</td>
                 <td class="col-right" style="color:#475569;">${line.unitPrice.toLocaleString('vi-VN')} đ</td>
+                <td class="col-right" style="color:#047857;">${Math.round(line.materialAmount || 0).toLocaleString('vi-VN')} đ</td>
+                <td class="col-right" style="color:#b45309;">${Math.round(line.laborAmount || 0).toLocaleString('vi-VN')} đ</td>
                 <td class="col-right" style="font-weight:700; color:#0f172a;">${line.formattedTotalAmount}</td>
                 <td style="font-size: 6.2px; color: #475569;">
                   <i>${cleanAndNormalizeVietnameseText(line.item.clientExplanation)}</i><br/>

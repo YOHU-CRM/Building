@@ -444,6 +444,11 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     plan.sketchNotes.forEach(n => { line(n, n.startsWith('↺') ? '#b45309' : n.startsWith('?') ? '#7c3aed' : '#15803d'); y += 2; });
     y += 6;
   }
+  if (plan.advice && plan.advice.length) {
+    head(plan.adviceApplied ? 'TƯ VẤN KTS — ĐÃ ÁP DỤNG VÀO BẢN VẼ' : 'TƯ VẤN KTS — CHƯA ÁP DỤNG (bản vẽ giữ ý gia chủ)');
+    plan.advice.forEach((n, k) => { line(`${k + 1}. ${n}`, plan.adviceApplied ? '#15803d' : '#1d4ed8'); y += 2; });
+    y += 6;
+  }
   head('PHONG THỦY BỐ TRÍ');
   plan.fengShuiNotes.forEach(n => { line('• ' + n); y += 2; });
   y += 6;
