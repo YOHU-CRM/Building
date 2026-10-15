@@ -68,6 +68,20 @@ export const addDesignSample = async (sample: DesignSample) => {
 };
 void addDoc;
 
+const adminFetch = async (url: string, method: string, body?: any) => {
+  let adminCode = '';
+  try { adminCode = sessionStorage.getItem('yohu_admin_code') || ''; } catch {}
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'x-admin-code': adminCode }, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Lỗi ${res.status}`);
+  return data;
+};
+/** Sửa mẫu (qua máy chủ, cần mã admin) */
+export const updateDesignSample = (id: string, sample: Partial<DesignSample>) => adminFetch(`/api/admin/design-samples/${encodeURIComponent(id)}`, 'PUT', sample);
+/** Xóa mẫu (qua máy chủ; bản sao lưu giữ ở deletedDesignSamples). Giao diện phải hỏi xác nhận trước. */
+export const deleteDesignSample = (id: string) => adminFetch(`/api/admin/design-samples/${encodeURIComponent(id)}`, 'DELETE');
+export const isDefaultSample = (id?: string) => !id || id.startsWith('sample-');
+
 export const getDesignSamples = async (constructionType?: string, area?: number) => {
   try {
     const q = collection(db, COLLECTION_NAME);

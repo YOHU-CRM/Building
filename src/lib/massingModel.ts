@@ -49,6 +49,15 @@ const FLOOR_COLOR: Record<string, string> = {
 };
 export const floorColor = (type: string) => FLOOR_COLOR[type] || '#eeeeee';
 
+/** "9x14" / "9 x 14 m" / "120m2" → rộng × dài (m) — dùng chung cho 3D và mặt đứng */
+export function parseDimsWL(d?: string) {
+  const s = String(d || '').toLowerCase().replace(/m2|m²/g, '').replace(/,/g, '.');
+  const m = s.match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/);
+  if (m) return { w: parseFloat(m[1]), l: parseFloat(m[2]) };
+  const a = parseFloat(s) || 100; const w = Math.round(Math.sqrt(a / 2.5)) || 5;
+  return { w, l: Math.round(a / w) };
+}
+
 /** Toạ độ mặt bằng → thế giới 3D */
 const WX = (x: number) => x;
 const WZ = (y: number) => -y;
@@ -332,6 +341,8 @@ function buildWalls(plan: FloorPlanResult, walled: PlanRoom[], insideAll: PlanRo
       const top = d.open ? Math.min(H - 0.3, 2.6) : d.rolling ? Math.min(H - 0.4, 3.0) : d.main ? Math.min(H - 0.5, 2.7) : 2.2;
       addOp(horiz, c, { a: base + d.at, b: base + d.at + d.width, y0: 0, y1: top, mat: d.main ? 'door_main' : d.rolling ? 'rolling' : undefined });
     });
+  });
+  insideAll.forEach(r => {
     r.windows.forEach(s => {
       const horiz = s === 'front' || s === 'rear';
       const c = s === 'front' ? r.y : s === 'rear' ? r.y + r.h : s === 'left' ? r.x : r.x + r.w;
@@ -339,7 +350,20 @@ function buildWalls(plan: FloorPlanResult, walled: PlanRoom[], insideAll: PlanRo
       const len = Math.min(sideLen * 0.6, 2.4);
       const base = (horiz ? r.x : r.y) + (sideLen - len) / 2;
       const wc = r.type === 'wc';
-      addOp(horiz, c, { a: base, b: base + len, y0: wc ? 1.5 : 0.9, y1: wc ? 2.1 : 2.3, mat: 'glass' });
+      // cửa sổ không được chồng lên lỗ cửa đi cùng bức tường → dời sang đoạn tường trống rộng hơn, không đủ chỗ thì bỏ
+      const k = `${horiz ? 'h' : 'v'}${Math.round(c * 100)}`;
+      const doorsHere = (ops.get(k) || []).filter(o => o.y0 === 0);
+      let a = base, b = base + len;
+      const hit = doorsHere.find(o => o.b > a + 0.05 && o.a < b - 0.05);
+      if (hit) {
+        const s0 = horiz ? r.x : r.y, s1 = s0 + sideLen;
+        const leftSpace = hit.a - 0.3 - (s0 + 0.3), rightSpace = (s1 - 0.3) - (hit.b + 0.3);
+        const L = Math.min(len, Math.max(leftSpace, rightSpace));
+        if (L < 0.6) return;
+        if (leftSpace >= rightSpace) { b = hit.a - 0.3; a = b - L; } else { a = hit.b + 0.3; b = a + L; }
+        if (doorsHere.some(o => o !== hit && o.b > a + 0.05 && o.a < b - 0.05)) return;
+      }
+      addOp(horiz, c, { a, b, y0: wc ? 1.5 : 0.9, y1: wc ? 2.1 : 2.3, mat: 'glass' });
     });
   });
 
