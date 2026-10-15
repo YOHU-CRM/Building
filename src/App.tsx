@@ -64,7 +64,10 @@ import DesignTemplateGallery from "./components/DesignTemplateGallery";
 import PerspectiveImageUploader from "./components/PerspectiveImageUploader";
 import FloorPlan2DViewer from "./components/FloorPlan2DViewer";
 import PerspectiveStudio, { PerspectiveOptions } from "./components/PerspectiveStudio";
-import { computeSiteFor, setbacksFor, roomsFor } from "./lib/siteGeometry";
+import RoomRequirementsPanel from "./components/RoomRequirementsPanel";
+import AdminDesignManager from "./components/AdminDesignManager";
+import CustomerResultsCard, { PerspectiveShot } from "./components/CustomerResultsCard";
+import { computeSiteFor, setbacksFor, roomsFor, planDimsFor } from "./lib/siteGeometry";
 // 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
 const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
 import ElevationViewer from "./components/ElevationViewer";
@@ -179,7 +182,7 @@ export default function App() {
       { ma_ctv: "VIP01", loai_doi_tac: "B2B VIP", hh_thoa_thuan: 30 }
     ];
   });
-  const [activeAdminTab, setActiveAdminTab] = useState<'leads' | 'videos' | 'commissions' | 'ctv' | 'perspective'>('leads');
+  const [activeAdminTab, setActiveAdminTab] = useState<'leads' | 'videos' | 'commissions' | 'ctv' | 'perspective' | 'samples'>('leads');
   const [adminVideoStatusFilter, setAdminVideoStatusFilter] = useState<'ALL' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
   const [adminVideoSearch, setAdminVideoSearch] = useState<string>("");
   const [floorPlanSvgUrl, setFloorPlanSvgUrl] = useState<string | null>(null);
@@ -197,9 +200,13 @@ export default function App() {
         if (data.gasUrl) setDynamicGasUrl(data.gasUrl);
         if (data.hotline) setHotline(data.hotline);
         if (data.bankInfo) setBankInfo(data.bankInfo);
+        if (typeof data.videoOrderEnabled === 'boolean') setVideoOrderEnabled(data.videoOrderEnabled);
       })
       .catch(err => console.warn("Could not fetch dynamic GAS URL:", err));
   }, []);
+
+  // Admin bật/tắt mục video với khách (cài đặt trên máy chủ)
+  const [videoOrderEnabled, setVideoOrderEnabled] = useState<boolean>(true);
 
   // CRM Admin dashboard display toggle
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
@@ -613,6 +620,29 @@ export default function App() {
   const [renderedConceptImage, setRenderedConceptImage] = useState<string>("");
   const [conceptError, setConceptError] = useState<string>("");
   const [massingSnapshot, setMassingSnapshot] = useState<string>("");   // ảnh chụp 3D hình khối làm khung cho ảnh phối cảnh
+  // Bộ ảnh phối cảnh đã tạo của khách (giữ 6 ảnh gần nhất, lưu trên máy khách)
+  const [perspectiveShots, setPerspectiveShots] = useState<PerspectiveShot[]>([]);
+  const shotsKey = () => `yohu_perspective_shots_${clientIdRef.current || 'guest'}`;
+  const addPerspectiveShot = (url: string, style: string, view: string) => {
+    const save = (u: string) => setPerspectiveShots(prev => {
+      const next = [{ url: u, style, view, at: new Date().toISOString() }, ...prev].slice(0, 6);
+      try { localStorage.setItem(shotsKey(), JSON.stringify(next)); } catch { /* bộ nhớ đầy: vẫn giữ trong phiên */ }
+      return next;
+    });
+    // nén JPEG ~1280px cho nhẹ trước khi lưu
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+        save(c.toDataURL('image/jpeg', 0.85));
+      } catch { save(url); }
+    };
+    img.onerror = () => save(url);
+    img.src = url;
+  };
+  const scrollToId = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   
   const [aiLoading, setAiLoading] = useState<boolean>(false);
@@ -702,6 +732,10 @@ export default function App() {
   useEffect(() => { affiliateDataRef.current = affiliateData; }, [affiliateData]);
   useEffect(() => { langRef.current = lang; }, [lang]);
   useEffect(() => { clientIdRef.current = clientId; }, [clientId]);
+  // ảnh phối cảnh theo từng khách (đổi khách → nạp bộ ảnh của khách đó)
+  useEffect(() => {
+    try { setPerspectiveShots(JSON.parse(localStorage.getItem(`yohu_perspective_shots_${clientId || 'guest'}`) || "[]")); } catch { setPerspectiveShots([]); }
+  }, [clientId]);
 
   useEffect(() => {
     // If we have a local fengshui analysis, refresh it when language changes to ensure consistency
@@ -1979,6 +2013,7 @@ export default function App() {
         return;
       }
       setRenderedConceptImage(data.imageUrl);
+      addPerspectiveShot(data.imageUrl, o.style, o.view);
     } catch (err: any) {
       setConceptError(lang === 'vi' ? `Không kết nối được máy chủ tạo ảnh: ${err?.message || err}` : `Cannot reach image server: ${err?.message || err}`);
     } finally {
@@ -2139,7 +2174,7 @@ export default function App() {
       const advice2026Text = fs.advice2026 || '';
 
       // Generate clear architectural floor plan SVG
-      const dimMatch = (ct?.dimensions || ct?.kich_thuoc || "10x15").match(/(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)/);
+      const dimMatch = (planDimsFor(ct) || ct?.kich_thuoc || "10x15").match(/(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)/);
       const widthM = dimMatch ? parseFloat(dimMatch[1]) : 10;
       const lengthM = dimMatch ? parseFloat(dimMatch[2]) : 15;
       const archSvg = generateArchitecturalFloorPlanSvg({
@@ -2848,7 +2883,11 @@ ${totalPages >= 3 ? `
               <button onClick={() => setActiveAdminTab('ctv')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'ctv' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 {lang === 'vi' ? 'Quản lý CTV_Affiliate' : 'CTV_Affiliate'}
               </button>
+              <button onClick={() => setActiveAdminTab('samples')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'samples' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
+                🖼️ Mẫu thiết kế
+              </button>
             </div>
+            {activeAdminTab === 'samples' && <AdminDesignManager />}
 
             {activeAdminTab === 'leads' && (
               <CrmDashboard 
@@ -3882,6 +3921,9 @@ ${totalPages >= 3 ? `
                         )}
                       </div>
 
+                      {/* YÊU CẦU TỪNG PHÒNG: kích thước, tầng, vị trí, hướng (không bắt buộc) */}
+                      <RoomRequirementsPanel theme={theme} constructionInfo={constructionInfo} setConstructionInfo={setConstructionInfo as any} />
+
                       {/* DESIGN REFERENCE IMAGES CONTAINER (ẢNH THAM CHIẾU DUPLICATING SCREENS) */}
                       <div>
                         <label className={`block text-xs sm:text-sm uppercase font-black tracking-wider mb-2 font-sans ${theme === 'dark' ? 'text-slate-400' : 'text-slate-900'}`}>
@@ -4064,6 +4106,18 @@ ${totalPages >= 3 ? `
                         const activeCustomerLinkAnh = activeCustomerLead?.link_anh_phoi_canh || "";
                         return (
                           <>
+                            {goiKichHoat === 'design' && (
+                              <CustomerResultsCard
+                                theme={theme}
+                                customerName={userInfo?.name}
+                                shots={perspectiveShots}
+                                videoUrl={activeCustomerLead?.link_video_phoi_canh || ""}
+                                onOpen3D={() => { setActiveDrawingTab('massing'); scrollToId('yohu-drawings'); }}
+                                onOpenPlan={() => { setActiveDrawingTab('floorplan'); scrollToId('yohu-drawings'); }}
+                                onOpenStudio={() => scrollToId('yohu-perspective')}
+                                setZoomImage={setZoomImage}
+                              />
+                            )}
                             <ReportDashboard 
                               aiReport={pricedAiReport} 
                               lang={lang} 
@@ -4131,7 +4185,7 @@ ${totalPages >= 3 ? `
                               {activeDrawingTab === 'massing' ? (
                                 <React.Suspense fallback={<div className="mt-6 p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
                                   <Massing3DViewer
-                                    dimensions={constructionInfo.dimensions}
+                                    dimensions={planDimsFor(constructionInfo)}
                                     floors={parseInt(constructionInfo.floors) || 2}
                                     rooms={roomsFor(constructionInfo)}
                                     theme={theme}
@@ -4147,7 +4201,7 @@ ${totalPages >= 3 ? `
                                 </React.Suspense>
                               ) : activeDrawingTab === 'floorplan' ? (
                                 <FloorPlan2DViewer 
-                                  dimensions={constructionInfo.dimensions}
+                                  dimensions={planDimsFor(constructionInfo)}
                                   floors={parseInt(constructionInfo.floors) || 2}
                                   constructionType={constructionInfo.constructionType}
                                   rooms={roomsFor(constructionInfo)}
@@ -4163,7 +4217,7 @@ ${totalPages >= 3 ? `
                                 />
                               ) : (
                                 <ElevationViewer 
-                                  dimensions={constructionInfo.dimensions}
+                                  dimensions={planDimsFor(constructionInfo)}
                                   floors={parseInt(constructionInfo.floors) || 2}
                                   constructionType={constructionInfo.constructionType}
                                   theme={theme}
@@ -4186,8 +4240,8 @@ ${totalPages >= 3 ? `
                             </div>
                           )}
                           
-                          {/* --- BỔ SUNG: BANNER MỒI VIDEO --- */}
-                          <div className={`mt-6 p-5 sm:p-6 rounded-2xl border-2 border-dashed ${theme === 'dark' ? 'bg-[#101524] border-[#FFD700]/30' : 'bg-amber-50 border-amber-300'}`}>
+                          {/* --- BỔ SUNG: BANNER MỒI VIDEO (admin có thể tắt) --- */}
+                          {videoOrderEnabled && <div className={`mt-6 p-5 sm:p-6 rounded-2xl border-2 border-dashed ${theme === 'dark' ? 'bg-[#101524] border-[#FFD700]/30' : 'bg-amber-50 border-amber-300'}`}>
                             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                               <div className="flex items-center gap-4 text-left">
                                 <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center text-white shrink-0 shadow-lg">
@@ -4209,7 +4263,7 @@ ${totalPages >= 3 ? `
                                 {t.viewVideo3dPackages || "Xem các gói Video 3D"}
                               </button>
                             </div>
-                          </div>
+                          </div>}
 
                           {/* --- BỔ SUNG: BANNER MẠNG LƯỚI THỢ TẬN TỤY --- */}
                           <div className={`mt-4 p-5 sm:p-6 rounded-2xl border-2 border-dashed ${theme === 'dark' ? 'bg-[#101524] border-blue-500/40' : 'bg-blue-50 border-blue-300'}`}>
@@ -4565,6 +4619,23 @@ ${totalPages >= 3 ? `
                     fengShuiElement={fengShuiAnalysis?.element || 'Mộc'}
                     floors={constructionInfo.floors || 2}
                     dimensions={constructionInfo.dimensions || '10 x 15 m'}
+                    houseSlot={goiKichHoat === 'design' ? (
+                      <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'bg-[#121829]/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                        <div className="text-sm font-extrabold mb-1">🏠 3D ngôi nhà của anh/chị (dựng từ mặt bằng)</div>
+                        <React.Suspense fallback={<div className="p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
+                          <Massing3DViewer dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
+                            customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
+                            frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
+                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} onSnapshot={(url) => setMassingSnapshot(url)} />
+                        </React.Suspense>
+                      </div>
+                    ) : (
+                      <div className={`p-4 rounded-2xl border-2 border-dashed text-center ${theme === 'dark' ? 'border-purple-500/30 bg-[#101524]' : 'border-purple-300 bg-purple-50'}`}>
+                        <div className="text-sm font-black text-purple-500">🧊 3D ngôi nhà của chính anh/chị</div>
+                        <p className="text-xs text-slate-400 mt-1">Dựng đúng mặt bằng, số tầng, mái và hướng nhà — xoay xem trên điện thoại. Có trong gói Thiết kế.</p>
+                        <button onClick={() => requestPackage('design')} className="mt-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-black cursor-pointer">Mở gói Thiết kế</button>
+                      </div>
+                    )}
                   />
                 )}
 
