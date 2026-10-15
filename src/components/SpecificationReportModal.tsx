@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { setbacksFor, roomsFor } from '../lib/siteGeometry';
+import { setbacksFor, roomsFor, planDimsFor } from '../lib/siteGeometry';
 import { 
   FileText, Download, RefreshCw, CheckCircle2, AlertCircle, 
   Layers, Globe, CheckSquare, Square, ChevronRight, X, Sparkles, Printer, Lock,
@@ -100,7 +100,7 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
 
   const currentOption = STRUCTURAL_OPTIONS.find(opt => opt.id === selectedOptionId) || STRUCTURAL_OPTIONS[0];
 
-  const dim = constructionInfo?.dimensions || "100m²";
+  const dim = planDimsFor(constructionInfo) || "100m²";
   const floors = constructionInfo?.floors || 2;
   const { groundArea, totalArea, widthM, lengthM } = parseFloorArea(dim);
   const sGround = groundArea;

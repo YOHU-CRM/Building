@@ -65,6 +65,31 @@ export default function CrmDashboard({
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [showGsheetGuide, setShowGsheetGuide] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'leads' | 'videos' | 'gsheet' | 'revenue'>('leads');
+  // Công tắc vận hành video (lưu trên máy chủ)
+  const [appSettings, setAppSettings] = useState<{ videoOrderEnabled: boolean; videoAutoDispatch: boolean } | null>(null);
+  const [settingsNote, setSettingsNote] = useState('');
+  const adminHeaders = () => ({ "Content-Type": "application/json", "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" });
+  useEffect(() => {
+    fetch("/api/admin/settings", { headers: adminHeaders() }).then(r => r.json()).then(d => { if (d?.settings) setAppSettings(d.settings); }).catch(() => {});
+  }, []);
+  const toggleSetting = async (k: 'videoOrderEnabled' | 'videoAutoDispatch') => {
+    if (!appSettings) return;
+    const next = { ...appSettings, [k]: !appSettings[k] };
+    setAppSettings(next);
+    try {
+      const r = await fetch("/api/admin/settings", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ [k]: next[k] }) });
+      const d = await r.json();
+      if (d?.settings) setAppSettings(d.settings);
+      setSettingsNote(d?.note || (r.ok ? '✓ Đã lưu' : '❌ Lưu thất bại'));
+    } catch { setSettingsNote('❌ Không kết nối được máy chủ'); }
+  };
+  /** Dựng video thủ công bên ngoài → dán link để giao cho khách */
+  const pasteVideoLink = async (lead: any) => {
+    const url = window.prompt(`Dán link video đã dựng cho "${lead.userInfo?.name || lead.id}" (YouTube / Google Drive / link tải):`, lead.link_video_phoi_canh || '');
+    if (!url) return;
+    await handleUpdateVideoOrderStatus("VID-" + lead.id, "COMPLETED", url.trim());
+    setVideoDispatchToast({ type: 'success', message: `✓ Đã gắn link video cho "${lead.userInfo?.name || lead.id}". Khách sẽ thấy video trong hồ sơ.`, videoUrl: url.trim() });
+  };
 
   // Video Orders & Filtering States
   const [videoStatusFilter, setVideoStatusFilter] = useState<'ALL' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
@@ -875,6 +900,22 @@ export default function CrmDashboard({
             </div>
           </div>
 
+          {/* ⚙️ CÔNG TẮC VẬN HÀNH VIDEO */}
+          <div className="mb-4 p-3 rounded-xl border border-slate-700 bg-slate-950/60 text-xs space-y-2">
+            <div className="font-bold text-amber-300">⚙️ Chế độ video (lưu trên máy chủ, áp dụng cho mọi khách)</div>
+            {!appSettings ? <div className="text-slate-500">Đang tải cài đặt… (cần đăng nhập Admin)</div> : (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => toggleSetting('videoOrderEnabled')} className={`px-3 py-2 rounded-lg font-bold border cursor-pointer ${appSettings.videoOrderEnabled ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-800 text-slate-300 border-slate-600'}`}>
+                  {appSettings.videoOrderEnabled ? '🟢 Khách ĐƯỢC đặt video' : '⚪ Ẩn mục video với khách'}
+                </button>
+                <button type="button" onClick={() => toggleSetting('videoAutoDispatch')} className={`px-3 py-2 rounded-lg font-bold border cursor-pointer ${appSettings.videoAutoDispatch ? 'bg-purple-600 text-white border-purple-500' : 'bg-slate-800 text-slate-300 border-slate-600'}`}>
+                  {appSettings.videoAutoDispatch ? '🟣 Gửi TỰ ĐỘNG sang Video Studio (tốn tín dụng)' : '✋ THỦ CÔNG: admin dựng video ngoài, dán link'}
+                </button>
+              </div>
+            )}
+            {settingsNote && <div className="text-slate-400">{settingsNote}</div>}
+          </div>
+
           {/* 🎯 STATUS FILTER TABS / PILLS */}
           <div className="flex flex-wrap items-center gap-2 mb-4 bg-slate-950/60 p-2 rounded-xl border border-slate-800">
             <span className="text-xs font-bold text-slate-400 mr-1 flex items-center gap-1">
@@ -1488,8 +1529,14 @@ export default function CrmDashboard({
                             </button>
                           )}
 
-                          {/* 🎬 NÚT DUYỆT & TẠO VIDEO 3D PHONG THỦY */}
+                          {/* 🎬 NÚT DUYỆT & TẠO VIDEO 3D PHONG THỦY (chỉ khi bật gửi tự động) / DÁN LINK (thủ công) */}
                           <button
+                            type="button"
+                            onClick={() => pasteVideoLink(lead)}
+                            className="px-2.5 py-1 rounded text-[10px] font-bold bg-slate-700 text-slate-100 hover:bg-slate-600 cursor-pointer whitespace-nowrap"
+                            title="Dựng video bên ngoài rồi dán link để giao cho khách"
+                          >🔗 Dán link video</button>
+                          {appSettings?.videoAutoDispatch !== false && <button
                             type="button"
                             onClick={() => handleDispatchVideoToStudio(lead)}
                             disabled={dispatchingVideoId === lead.id}
@@ -1512,7 +1559,7 @@ export default function CrmDashboard({
                                 ? "⚠️ Gửi lỗi — Gửi lại"
                                 : "🎬 Duyệt & Tạo Video 3D"}
                             </span>
-                          </button>
+                          </button>}
                           {lead.videoStatus === 'FAILED' && lead.videoError && (
                             <span className="text-[10px] text-rose-400 max-w-[220px] leading-snug" title={lead.videoError}>❌ {String(lead.videoError).slice(0, 120)}</span>
                           )}

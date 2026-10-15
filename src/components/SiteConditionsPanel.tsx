@@ -69,6 +69,16 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
           <input className={input} inputMode="decimal" placeholder={site.hasDims ? `Tự động: ${site.backSetbackM}` : '—'}
             value={ct.backSetbackM ?? ''} onChange={e => set({ backSetbackM: e.target.value === '' ? undefined : e.target.value })} />
         </div>
+        <div className={box}>
+          <label className={label}>Lùi bên trái (m)</label>
+          <input className={input} inputMode="decimal" placeholder="0 = xây sát ranh"
+            value={ct.leftSetbackM ?? ''} onChange={e => set({ leftSetbackM: e.target.value === '' ? undefined : e.target.value })} />
+        </div>
+        <div className={box}>
+          <label className={label}>Lùi bên phải (m)</label>
+          <input className={input} inputMode="decimal" placeholder="0 = xây sát ranh"
+            value={ct.rightSetbackM ?? ''} onChange={e => set({ rightSetbackM: e.target.value === '' ? undefined : e.target.value })} />
+        </div>
         </>}
         <div className={`${box} col-span-2`}>
           <label className={label}>Loại mái</label>

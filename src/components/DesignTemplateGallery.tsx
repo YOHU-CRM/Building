@@ -9,6 +9,8 @@ interface DesignTemplateGalleryProps {
   fengShuiElement?: string; // Kim, Mộc, Thủy, Hỏa, Thổ
   floors?: number;
   dimensions?: string;
+  /** 3D thật của ngôi nhà khách (gói Thiết kế) hoặc thẻ mời nâng cấp — thay cho khối minh họa chung */
+  houseSlot?: React.ReactNode;
 }
 
 interface TemplateItem {
@@ -31,7 +33,8 @@ export default function DesignTemplateGallery({
   lang,
   fengShuiElement = 'Mộc',
   floors = 2,
-  dimensions = '10 x 15 m'
+  dimensions = '10 x 15 m',
+  houseSlot
 }: DesignTemplateGalleryProps) {
   const isDark = theme === 'dark';
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
@@ -300,7 +303,7 @@ export default function DesignTemplateGallery({
 
   // Three.js 3D house builder
   useEffect(() => {
-    if (!show3DModel || !mountRef.current) return;
+    if (houseSlot || !show3DModel || !mountRef.current) return;
 
     const currentMount = mountRef.current;
     const width = currentMount.clientWidth;
@@ -443,8 +446,8 @@ export default function DesignTemplateGallery({
       {isExpanded && (
         <div className="space-y-6 animate-fade-in">
           
-          {/* 3D HOUSE MODEL VIEWER SECTION */}
-          <div className={`p-4 rounded-2xl border ${isDark ? 'bg-[#121829]/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+          {/* 3D HOUSE MODEL VIEWER SECTION — ưu tiên 3D thật của nhà khách */}
+          {houseSlot ? houseSlot : <div className={`p-4 rounded-2xl border ${isDark ? 'bg-[#121829]/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Box className="w-5 h-5 text-red-600" />
@@ -479,7 +482,7 @@ export default function DesignTemplateGallery({
                 </div>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* FILTERS BAR */}
           <div className={`p-4 rounded-2xl border flex flex-wrap gap-4 items-center justify-between ${

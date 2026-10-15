@@ -38,7 +38,7 @@ export default function PerspectiveStudio({ theme, referenceImages, massingSnaps
   const thumb = 'w-20 h-20 sm:w-24 sm:h-24 rounded-lg object-cover border border-slate-500/30 cursor-pointer';
 
   return (
-    <div className={`mt-6 p-4 rounded-xl border space-y-3 ${dark ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
+    <div id="yohu-perspective" className={`mt-6 p-4 rounded-xl border space-y-3 ${dark ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
       <h4 className={`text-xs sm:text-sm font-black uppercase tracking-wider ${dark ? 'text-[#FFD700]' : 'text-slate-800'}`}>🎨 Ảnh phối cảnh theo yêu cầu gia chủ</h4>
       <p className="text-[12px] lg:text-xs text-slate-400 leading-relaxed">
         AI vẽ <b>đúng hình khối</b> lấy từ 3D (số tầng, mái, cửa) và <b>đúng phong cách</b> theo ảnh tham chiếu gia chủ tải lên. Gói Thiết kế.
