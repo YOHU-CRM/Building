@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { setbacksFor, roomsFor } from '../lib/siteGeometry';
 import { 
   FileText, Download, RefreshCw, CheckCircle2, AlertCircle, 
   Layers, Globe, CheckSquare, Square, ChevronRight, X, Sparkles, Printer, Lock,
@@ -119,9 +120,9 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
     groundFloorArea: sGround,
     totalConstructionArea: sTotal,
     lang,
-    rooms: constructionInfo?.rooms,
-    frontSetbackM: (constructionInfo as any)?.frontSetbackM,
-    backSetbackM: (constructionInfo as any)?.backSetbackM
+    rooms: roomsFor(constructionInfo),
+    frontSetbackM: setbacksFor(constructionInfo).front,
+    backSetbackM: setbacksFor(constructionInfo).back
   });
 
   // Cache helper functions for browser-persistent storage

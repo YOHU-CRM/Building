@@ -368,7 +368,10 @@ export default function CrmDashboard({
       direction: lead.userInfo?.desiredDirection || (Array.isArray(lead.fengShuiAnalysis?.favorableDirections) ? lead.fengShuiAnalysis.favorableDirections[0] : lead.fengShuiAnalysis?.favorableDirections) || "Nam (Sinh Khí)",
       buildingType: lead.constructionInfo?.constructionType || "Biệt thự",
       packageType: lead.videoPackageType || (lead.goiMua?.includes("1.5") ? "CINEMATIC" : "STANDARD"),
-      images: lead.images || lead.constructionInfo?.referenceImages || (lead.link_anh_phoi_canh ? [lead.link_anh_phoi_canh] : [])
+      // Ưu tiên ảnh phối cảnh của chính ngôi nhà; ảnh tham chiếu của khách chỉ dùng khi chưa có ảnh phối cảnh
+      images: [lead.link_anh_phoi_canh, lead.renderedConceptImage, ...(lead.images || [])].filter(Boolean).length
+        ? [lead.link_anh_phoi_canh, lead.renderedConceptImage, ...(lead.images || [])].filter(Boolean)
+        : (lead.constructionInfo?.referenceImages || [])
     };
 
     try {
@@ -395,6 +398,7 @@ export default function CrmDashboard({
           const idx = leads.findIndex((l: any) => l.id === leadId);
           if (idx >= 0) {
             leads[idx].videoStatus = "RENDERING";
+            leads[idx].videoError = "";
             leads[idx].link_video_phoi_canh = resData.studioResponse?.videoUrl || leads[idx].link_video_phoi_canh || "";
             localStorage.setItem("yohu_crm_leads", JSON.stringify(leads));
           }
@@ -402,14 +406,21 @@ export default function CrmDashboard({
 
         setVideoDispatchToast({
           type: 'success',
-          message: `🎬 Đã gửi lệnh tạo video 3D phong thủy cho hồ sơ "${lead.userInfo?.name || leadId}" sang Video Studio thành công!`,
+          message: `🎬 ${resData?.message || 'Video Studio đã nhận lệnh.'} Hồ sơ "${lead.userInfo?.name || leadId}".${(resData?.warnings || []).length ? ' ⚠️ ' + resData.warnings.join(' ') : ''}`,
           videoUrl: resData?.studioResponse?.videoUrl
         });
       } else {
-        // Không gửi thẳng từ trình duyệt (lộ mã bí mật). Báo lỗi rõ để admin xử lý.
+        // Không gửi thẳng từ trình duyệt (lộ mã bí mật). Báo NGUYÊN NHÂN rõ để admin xử lý, và lưu trạng thái lỗi vào hồ sơ.
+        const why = res.status === 401 || res.status === 403 ? 'Phiên Admin hết hạn / sai mã admin — đăng nhập lại.' : (resData?.error || `Lỗi máy chủ ${res.status}.`);
+        const savedLeads = localStorage.getItem("yohu_crm_leads");
+        if (savedLeads) {
+          const leads = JSON.parse(savedLeads);
+          const idx = leads.findIndex((l: any) => l.id === leadId);
+          if (idx >= 0) { leads[idx].videoStatus = "FAILED"; leads[idx].videoError = why; localStorage.setItem("yohu_crm_leads", JSON.stringify(leads)); }
+        }
         setVideoDispatchToast({
           type: 'error',
-          message: `❌ Chưa gửi được lệnh video (${resData?.error || 'lỗi ' + res.status}). Kiểm tra đăng nhập Admin và cấu hình VIDEO_STUDIO_URL trên Vercel.`
+          message: `❌ CHƯA GỬI ĐƯỢC video cho "${lead.userInfo?.name || leadId}". Nguyên nhân: ${why}${(resData?.warnings || []).length ? ' ⚠️ ' + resData.warnings.join(' ') : ''}`
         });
       }
     } catch (err: any) {
@@ -727,6 +738,17 @@ export default function CrmDashboard({
               </span>
             )}
           </button>
+
+          <a 
+            href="https://aistudio.google.com/apps/62de25f5-0959-4547-a723-46017c8af186?showPreview=true&showAssistant=true"
+            target="_blank"
+            rel="noreferrer"
+            className="px-3.5 py-2 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 hover:text-white text-xs font-bold rounded-xl border border-blue-500/40 flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+            title="Mở Không Gian Quản Lý Đội Thợ - Thợ Tận Tụy"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
+            <span>👷 App Thợ Tận Tụy</span>
+          </a>
 
           <button 
             type="button"
@@ -1075,6 +1097,17 @@ export default function CrmDashboard({
                                 <Play className="w-3.5 h-3.5" />
                               </a>
                             )}
+
+                            <a
+                              href={`https://aistudio.google.com/apps/62de25f5-0959-4547-a723-46017c8af186?showPreview=true&showAssistant=true&leadId=${encodeURIComponent(order.projectId || order.id || "")}&customerName=${encodeURIComponent(order.customerName || "")}&phone=${encodeURIComponent(order.phone || "")}&buildingType=${encodeURIComponent(order.buildingType || "")}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2 py-1.5 bg-blue-500/20 text-blue-300 hover:bg-blue-600 hover:text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
+                              title="Giao việc sang Không Gian Quản Lý Đội Thợ - Thợ Tận Tụy"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Giao Thợ</span>
+                            </a>
                           </div>
                         </td>
                       </tr>
@@ -1475,9 +1508,14 @@ export default function CrmDashboard({
                                 ? "Đang gửi Video Studio..." 
                                 : lead.videoStatus === 'RENDERING'
                                 ? "🎬 Video Đang Render"
+                                : lead.videoStatus === 'FAILED'
+                                ? "⚠️ Gửi lỗi — Gửi lại"
                                 : "🎬 Duyệt & Tạo Video 3D"}
                             </span>
                           </button>
+                          {lead.videoStatus === 'FAILED' && lead.videoError && (
+                            <span className="text-[10px] text-rose-400 max-w-[220px] leading-snug" title={lead.videoError}>❌ {String(lead.videoError).slice(0, 120)}</span>
+                          )}
 
                           {lead.link_video_phoi_canh && (
                             <a
@@ -1490,6 +1528,18 @@ export default function CrmDashboard({
                               <Play className="w-3.5 h-3.5" />
                             </a>
                           )}
+
+                          {/* 👷 GIAO VIỆC CHO APP THỢ TẬN TỤY */}
+                          <a
+                            href={`https://aistudio.google.com/apps/62de25f5-0959-4547-a723-46017c8af186?showPreview=true&showAssistant=true&leadId=${encodeURIComponent(lead.id || "")}&customerName=${encodeURIComponent(lead.userInfo?.name || "")}&phone=${encodeURIComponent(lead.userInfo?.phone || "")}&buildingType=${encodeURIComponent(lead.constructionInfo?.constructionType || "")}&dimensions=${encodeURIComponent(lead.constructionInfo?.dimensions || "")}&budget=${encodeURIComponent(String(lead.constructionInfo?.totalBudget || ""))}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-2 py-1 bg-blue-500/20 text-blue-300 hover:bg-blue-600 hover:text-white rounded text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                            title="Chuyển tiếp công trình sang Không Gian Quản Lý Đội Thợ - Thợ Tận Tụy"
+                          >
+                            <ExternalLink className="w-3 h-3 text-blue-400" />
+                            <span>👷 Giao Thợ</span>
+                          </a>
 
                           <button 
                             type="button"

@@ -197,10 +197,33 @@ export const FengShuiResultCard: React.FC<FengShuiResultCardProps> = ({
               }`}
             >
               {Array.isArray(fengShuiAnalysis.favorableGroundbreakingDates)
-                ? fengShuiAnalysis.favorableGroundbreakingDates.join("; ")
+                ? <ul className="space-y-1">{fengShuiAnalysis.favorableGroundbreakingDates.map((d: string, i: number) => <li key={i} className={d.startsWith('📅') ? 'pl-2' : d.startsWith('ℹ️') ? 'text-[12px] font-normal opacity-80 mt-2' : ''}>{d}</li>)}</ul>
                 : fengShuiAnalysis.favorableGroundbreakingDates}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MƯỢN TUỔI ĐỘNG THỔ (khi gia chủ phạm hạn) */}
+      {Array.isArray((fengShuiAnalysis as any).borrowAgeDetails) && (fengShuiAnalysis as any).borrowAgeDetails.length > 0 && /phạm/.test(String((fengShuiAnalysis as any).advice2026 || '')) && !/không phạm/.test(String((fengShuiAnalysis as any).advice2026 || '').slice(0, 200)) && (
+        <div className={`p-4 rounded-xl border text-xs sm:text-sm ${theme === 'dark' ? 'bg-slate-950/40 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-900'}`}>
+          <b className="text-sm sm:text-base">🤝 Tuổi có thể mượn để động thổ</b>
+          <ul className="mt-1 space-y-1">{(fengShuiAnalysis as any).borrowAgeDetails.map((d: any, i: number) => <li key={i}>• <b>{d.year} {d.canChi}</b> — {d.why}</li>)}</ul>
+          <p className="mt-2 opacity-80">Vì sao loại tuổi khác: tuổi <b>xung</b> (đối nhau), <b>hình</b> (khắc chế) hoặc <b>hại</b> với năm khởi công đều kiêng đứng tên, dù không phạm Tam Tai / Kim Lâu / Hoang Ốc.</p>
+        </div>
+      )}
+
+      {/* ĐÔNG / TÂY TỨ MỆNH & VỢ CHỒNG KHÁC NHÓM */}
+      {((fengShuiAnalysis as any).menhQuaiExplain || ((fengShuiAnalysis as any).spouseAdvice || []).length > 0) && (
+        <div className={`p-4 rounded-xl border text-xs sm:text-sm ${theme === 'dark' ? 'bg-slate-950/40 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-900'}`}>
+          <b className="text-sm sm:text-base">🧭 Đông / Tây Tứ Mệnh là gì?</b>
+          <p className="mt-1">{(fengShuiAnalysis as any).menhQuaiExplain}</p>
+          {((fengShuiAnalysis as any).spouseAdvice || []).length > 0 && (
+            <>
+              <b className="block mt-3">💑 Vợ chồng khác nhóm — giải pháp cụ thể</b>
+              <ul className="mt-1 space-y-1">{(fengShuiAnalysis as any).spouseAdvice.map((a: string, i: number) => <li key={i}>• {a}</li>)}</ul>
+            </>
+          )}
         </div>
       )}
 

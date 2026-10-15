@@ -1,6 +1,6 @@
 import React from 'react';
 import { PROVINCE_NAMES_2025, resolveLocation } from '../lib/vnProvinces';
-import { computeSiteFor } from '../lib/siteGeometry';
+import { computeSiteFor, dimsKindOf } from '../lib/siteGeometry';
 import { decideFoundation, normalizeRoof } from '../lib/boqEngine';
 import { resolveOptionKey } from '../lib/unifiedPricing';
 
@@ -34,6 +34,13 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
       <div className={`text-xs sm:text-sm font-black uppercase tracking-wider ${dark ? 'text-amber-400' : 'text-amber-700'}`}>
         📍 Điều kiện khu đất (ảnh hưởng trực tiếp dự toán & bản vẽ)
       </div>
+      <div className={box}>
+        <label className={label}>Số đo "{ct.dimensions || '—'}" đã nhập là</label>
+        <div className="flex flex-wrap gap-2 text-xs sm:text-sm font-bold">
+          <button type="button" onClick={() => set({ dimensionsKind: 'nha' })} className={`px-3 py-2 rounded-lg border cursor-pointer ${dimsKindOf(ct) === 'nha' ? 'bg-amber-500 text-slate-950 border-amber-500' : dark ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>🏠 Kích thước nhà xây (mặc định)</button>
+          <button type="button" onClick={() => set({ dimensionsKind: 'dat' })} className={`px-3 py-2 rounded-lg border cursor-pointer ${dimsKindOf(ct) === 'dat' ? 'bg-amber-500 text-slate-950 border-amber-500' : dark ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>📜 Kích thước thửa đất (trừ khoảng lùi)</button>
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-2.5">
         <div className={box}>
           <label className={label}>Tỉnh / thành</label>
@@ -51,6 +58,7 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
             <option value="cat">Đất cát / pha cát</option>
           </select>
         </div>
+        {dimsKindOf(ct) === 'dat' && <>
         <div className={box}>
           <label className={label}>Lùi trước (m)</label>
           <input className={input} inputMode="decimal" placeholder={site.hasDims ? `Tự động: ${site.frontSetbackM}` : '—'}
@@ -61,6 +69,7 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
           <input className={input} inputMode="decimal" placeholder={site.hasDims ? `Tự động: ${site.backSetbackM}` : '—'}
             value={ct.backSetbackM ?? ''} onChange={e => set({ backSetbackM: e.target.value === '' ? undefined : e.target.value })} />
         </div>
+        </>}
         <div className={`${box} col-span-2`}>
           <label className={label}>Loại mái</label>
           <select className={input} value={ct.loai_mai || ''} onChange={e => set({ loai_mai: e.target.value })}>

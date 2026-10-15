@@ -12,6 +12,7 @@ interface ReportDashboardProps {
   theme: string;
   triggerRenderConceptImage: (type: any) => void;
   perspectiveSlot?: React.ReactNode;   // khu ảnh phối cảnh mới (ảnh tham chiếu + khung 3D)
+  onRedeemCode?: (code: string) => Promise<boolean>;   // kiểm tra mã kích hoạt trên MÁY CHỦ
   imageRendering: boolean;
   renderedConceptImage: string | null;
   setZoomImage: (url: string) => void;
@@ -24,7 +25,7 @@ interface ReportDashboardProps {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
 export default function ReportDashboard({ 
-  aiReport, lang, theme, triggerRenderConceptImage, imageRendering, renderedConceptImage, setZoomImage, perspectiveSlot,
+  aiReport, lang, theme, triggerRenderConceptImage, imageRendering, renderedConceptImage, setZoomImage, perspectiveSlot, onRedeemCode,
   packageTier = 'free', onUpgradePackage, link_anh_phoi_canh, clientId
 }: ReportDashboardProps) {
   const [activeStep, setActiveStep] = useState(0);
@@ -38,16 +39,12 @@ export default function ReportDashboard({
     }
   }, [clientId]);
 
-  const handleApplyActivationCode = () => {
+  // Mã kích hoạt kiểm tra trên máy chủ (biến ACTIVATION_CODES, mỗi mã dùng 1 lần) — không còn mã cứng trong trình duyệt
+  const handleApplyActivationCode = async () => {
     const code = activationCode.trim().toUpperCase();
-    if (["YOHU2026", "ADMINVIP", "379AI", "ADMIN888", "TC299"].includes(code)) {
-      setActivationError(null);
-      if (onUpgradePackage) {
-        onUpgradePackage('standard');
-      }
-    } else {
-      setActivationError(lang === 'vi' ? "Mã kích hoạt không đúng!" : "Invalid activation code!");
-    }
+    if (!code) { setActivationError(lang === 'vi' ? "Nhập mã Yohu gửi sau khi thanh toán." : "Enter your activation code."); return; }
+    const ok = onRedeemCode ? await onRedeemCode(code) : false;
+    setActivationError(ok ? null : (lang === 'vi' ? "Mã không đúng hoặc đã dùng. Liên hệ Yohu để được cấp mã." : "Invalid or used code."));
   };
 
   const t = getTranslation(lang as any);
@@ -216,7 +213,7 @@ export default function ReportDashboard({
                       <div className="flex gap-1.5 justify-center max-w-xs mx-auto">
                         <input 
                           type="text"
-                          placeholder="Mã kích hoạt (Mẹo: YOHU2026)"
+                          placeholder="Nhập mã kích hoạt"
                           value={activationCode}
                           onChange={(e) => setActivationCode(e.target.value)}
                           className="p-2 border border-slate-800 rounded-lg text-xs bg-[#101524] text-slate-250 focus:outline-none w-2/3 text-center font-mono uppercase"
@@ -234,7 +231,7 @@ export default function ReportDashboard({
                       )}
 
                       <div className="relative flex py-1 items-center justify-center">
-                        <span className="text-slate-500 text-[9px] font-mono font-bold uppercase">HOẶC DÀNH CHO BẠN TEST</span>
+                        <span className="text-slate-500 text-[9px] font-mono font-bold uppercase">CHƯA CÓ MÃ?</span>
                       </div>
 
                       <button 
@@ -247,11 +244,11 @@ export default function ReportDashboard({
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 mx-auto cursor-pointer shadow-md shadow-blue-600/15 transition"
                       >
                         <ShieldCheck className="w-4 h-4" />
-                        <span>Mở khóa nhanh tức thì để Test (1-Click)</span>
+                        <span>💳 Thanh toán để nhận mã / mở gói</span>
                       </button>
                       
                       <div className="text-[9px] text-slate-500 leading-normal font-sans">
-                        Bạn cũng có thể mở khóa bằng cách vào <b className="text-amber-400">Yohu Admin Panel 🔒</b> ở thanh tiêu đề chính, đăng nhập tài khoản quản trị, chọn khách hàng này và chuyển đổi gói dịch vụ tương ứng.
+                        <b>Mã kích hoạt lấy ở đâu?</b> Sau khi anh/chị chuyển khoản theo hướng dẫn ở nút "Thanh toán", Yohu gửi mã qua Zalo/SMS (mỗi mã dùng 1 lần), hoặc Yohu kích hoạt gói trực tiếp cho số điện thoại của anh/chị — tải lại trang là dùng được.
                       </div>
                     </div>
                   </div>
@@ -422,7 +419,7 @@ export default function ReportDashboard({
                       <div className="flex gap-1.5 justify-center max-w-xs mx-auto">
                         <input 
                           type="text"
-                          placeholder="Mã kích hoạt (Mẹo: YOHU2026)"
+                          placeholder="Nhập mã kích hoạt"
                           value={activationCode}
                           onChange={(e) => setActivationCode(e.target.value)}
                           className="p-2 border border-slate-800 rounded-lg text-xs bg-[#101524] text-slate-250 focus:outline-none w-2/3 text-center font-mono uppercase"
@@ -440,7 +437,7 @@ export default function ReportDashboard({
                       )}
 
                       <div className="relative flex py-1 items-center justify-center">
-                        <span className="text-slate-500 text-[9px] font-mono font-bold uppercase">HOẶC DÀNH CHO BẠN TEST</span>
+                        <span className="text-slate-500 text-[9px] font-mono font-bold uppercase">CHƯA CÓ MÃ?</span>
                       </div>
 
                       <button 
@@ -453,7 +450,7 @@ export default function ReportDashboard({
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 mx-auto cursor-pointer shadow-md shadow-blue-600/15 transition"
                       >
                         <ShieldCheck className="w-4 h-4" />
-                        <span>Mở khóa nhanh tức thì để Test (1-Click)</span>
+                        <span>💳 Thanh toán để nhận mã / mở gói</span>
                       </button>
                     </div>
                   </div>
