@@ -63,7 +63,12 @@ import PricingTableSection from "./components/PricingTableSection";
 import DesignTemplateGallery from "./components/DesignTemplateGallery";
 import PerspectiveImageUploader from "./components/PerspectiveImageUploader";
 import FloorPlan2DViewer from "./components/FloorPlan2DViewer";
-import PerspectiveStudio, { PerspectiveOptions } from "./components/PerspectiveStudio";
+import PerspectiveStudio, { PerspectiveOptions, RenderRequest, RenderResult, StudioShot, InteriorRoom } from "./components/PerspectiveStudio";
+import type { MassingShot } from "./components/Massing3DViewer";
+import AdminSettingsPanel from "./components/AdminSettingsPanel";
+import CtvManager from "./components/CtvManager";
+import CtvPortal from "./components/CtvPortal";
+import { listRoomSlots, specOf } from "./lib/roomSpecs";
 import RoomRequirementsPanel from "./components/RoomRequirementsPanel";
 import AdminDesignManager from "./components/AdminDesignManager";
 import CustomerResultsCard, { PerspectiveShot } from "./components/CustomerResultsCard";
@@ -182,7 +187,7 @@ export default function App() {
       { ma_ctv: "VIP01", loai_doi_tac: "B2B VIP", hh_thoa_thuan: 30 }
     ];
   });
-  const [activeAdminTab, setActiveAdminTab] = useState<'leads' | 'videos' | 'commissions' | 'ctv' | 'perspective' | 'samples'>('leads');
+  const [activeAdminTab, setActiveAdminTab] = useState<'leads' | 'videos' | 'commissions' | 'ctv' | 'perspective' | 'samples' | 'settings'>('leads');
   const [adminVideoStatusFilter, setAdminVideoStatusFilter] = useState<'ALL' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
   const [adminVideoSearch, setAdminVideoSearch] = useState<string>("");
   const [floorPlanSvgUrl, setFloorPlanSvgUrl] = useState<string | null>(null);
@@ -201,12 +206,22 @@ export default function App() {
         if (data.hotline) setHotline(data.hotline);
         if (data.bankInfo) setBankInfo(data.bankInfo);
         if (typeof data.videoOrderEnabled === 'boolean') setVideoOrderEnabled(data.videoOrderEnabled);
+        if (typeof data.freePreview3D === 'boolean') setFreePreview3D(data.freePreview3D);
+        if (typeof data.serverImageStorage === 'boolean') setServerImageStorage(data.serverImageStorage);
+        if (typeof data.ctvCommissionEnabled === 'boolean') setCtvLedgerOn(data.ctvCommissionEnabled);
       })
       .catch(err => console.warn("Could not fetch dynamic GAS URL:", err));
   }, []);
 
   // Admin bật/tắt mục video với khách (cài đặt trên máy chủ)
   const [videoOrderEnabled, setVideoOrderEnabled] = useState<boolean>(true);
+  // Các công tắc admin (mặc định TẮT, admin bật ở tab ⚙️ Cài đặt)
+  const [freePreview3D, setFreePreview3D] = useState<boolean>(false);          // khách chưa mua được xoay xem 3D (bản xem thử)
+  const [serverImageStorage, setServerImageStorage] = useState<boolean>(false); // lưu ảnh phối cảnh lên máy chủ (Firebase Storage)
+  const [ctvLedgerOn, setCtvLedgerOn] = useState<boolean>(false);               // máy chủ ghi sổ hoa hồng CTV khi admin xác nhận thu tiền
+  const ctvLedgerOnRef = useRef(false);
+  useEffect(() => { ctvLedgerOnRef.current = ctvLedgerOn; }, [ctvLedgerOn]);
+  const [showCtvPortal, setShowCtvPortal] = useState<boolean>(() => { try { return new URLSearchParams(window.location.search).get('ctv') === 'portal'; } catch { return false; } });
 
   // CRM Admin dashboard display toggle
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
@@ -623,24 +638,52 @@ export default function App() {
   // Bộ ảnh phối cảnh đã tạo của khách (giữ 6 ảnh gần nhất, lưu trên máy khách)
   const [perspectiveShots, setPerspectiveShots] = useState<PerspectiveShot[]>([]);
   const shotsKey = () => `yohu_perspective_shots_${clientIdRef.current || 'guest'}`;
-  const addPerspectiveShot = (url: string, style: string, view: string) => {
-    const save = (u: string) => setPerspectiveShots(prev => {
-      const next = [{ url: u, style, view, at: new Date().toISOString() }, ...prev].slice(0, 6);
-      try { localStorage.setItem(shotsKey(), JSON.stringify(next)); } catch { /* bộ nhớ đầy: vẫn giữ trong phiên */ }
-      return next;
-    });
-    // nén JPEG ~1280px cho nhẹ trước khi lưu
+  /** nén ảnh về JPEG ~1280px (ảnh AI trả về PNG 1–2MB → ~150–250KB) */
+  const compressImage = (url: string, max = 1280, q = 0.85) => new Promise<string>(resolve => {
+    if (!url.startsWith('data:')) return resolve(url);
     const img = new Image();
     img.onload = () => {
       try {
-        const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+        const k = Math.min(1, max / Math.max(img.width, img.height));
         const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
         c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
-        save(c.toDataURL('image/jpeg', 0.85));
-      } catch { save(url); }
+        resolve(c.toDataURL('image/jpeg', q));
+      } catch { resolve(url); }
     };
-    img.onerror = () => save(url);
+    img.onerror = () => resolve(url);
     img.src = url;
+  });
+  /** lưu ảnh lên máy chủ (khi admin bật "Lưu ảnh trên máy chủ") → trả link lâu dài; tắt / lỗi → giữ ảnh trên máy khách */
+  const uploadPerspective = async (url: string, meta: { key?: string; label?: string; style?: string; view?: string }) => {
+    if (!serverImageStorage || !url.startsWith('data:')) return url;
+    try {
+      const r = await fetch('/api/perspectives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(isAdminAuthenticated ? { 'x-admin-code': sessionStorage.getItem('yohu_admin_code') || '' } : {}) },
+        body: JSON.stringify({ clientId: clientIdRef.current, image: url, ...meta })
+      });
+      const d = await r.json().catch(() => ({}));
+      return r.ok && d.url ? String(d.url) : url;
+    } catch { return url; }
+  };
+  const addPerspectiveShot = (url: string, style: string, view: string, label?: string) => {
+    const save = (u: string) => setPerspectiveShots(prev => {
+      const next = [{ url: u, style, view, label, at: new Date().toISOString() }, ...prev.filter(p => p.url !== u)].slice(0, 9);
+      try { localStorage.setItem(shotsKey(), JSON.stringify(next)); } catch { /* bộ nhớ đầy: vẫn giữ trong phiên */ }
+      return next;
+    });
+    compressImage(url).then(u => u.startsWith('data:') ? uploadPerspective(u, { label, style, view }) : u).then(save);
+  };
+  /* ── Chốt hình khối (5 góc) & video 3D theo từng khách ── */
+  const [massingShots, setMassingShots] = useState<MassingShot[]>([]);
+  const [massingLockedAt, setMassingLockedAt] = useState<string>("");
+  const [localVideo, setLocalVideo] = useState<{ url: string; ext: string } | null>(null);
+  const [serverVideoUrl, setServerVideoUrl] = useState<string>("");   // link video admin đã gắn (lưu máy chủ)
+  const handleLockMassing = (shots: MassingShot[]) => {
+    const at = new Date().toISOString();
+    setMassingShots(shots); setMassingLockedAt(at);
+    setMassingSnapshot(shots.find(x => x.key === 'corner_l')?.url || shots[0]?.url || '');
+    try { localStorage.setItem(`yohu_massing_shots_${clientIdRef.current || 'guest'}`, JSON.stringify({ at, shots })); } catch { /* đầy bộ nhớ */ }
   };
   const scrollToId = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -734,7 +777,25 @@ export default function App() {
   useEffect(() => { clientIdRef.current = clientId; }, [clientId]);
   // ảnh phối cảnh theo từng khách (đổi khách → nạp bộ ảnh của khách đó)
   useEffect(() => {
-    try { setPerspectiveShots(JSON.parse(localStorage.getItem(`yohu_perspective_shots_${clientId || 'guest'}`) || "[]")); } catch { setPerspectiveShots([]); }
+    let local: PerspectiveShot[] = [];
+    try { local = JSON.parse(localStorage.getItem(`yohu_perspective_shots_${clientId || 'guest'}`) || "[]"); } catch { local = []; }
+    setPerspectiveShots(local);
+    try {
+      const m = JSON.parse(localStorage.getItem(`yohu_massing_shots_${clientId || 'guest'}`) || "null");
+      setMassingShots(m?.shots || []); setMassingLockedAt(m?.at || "");
+      setMassingSnapshot(m?.shots?.[0]?.url || "");
+    } catch { setMassingShots([]); setMassingLockedAt(""); }
+    setLocalVideo(null); setServerVideoUrl("");
+    // ảnh đã lưu trên máy chủ (đổi máy / xóa trình duyệt vẫn còn)
+    if (clientId) fetch(`/api/perspectives/${encodeURIComponent(clientId)}`).then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.videoUrl) setServerVideoUrl(String(d.videoUrl));
+      const list: PerspectiveShot[] = Array.isArray(d?.shots) ? d.shots : [];
+      if (!list.length) return;
+      setPerspectiveShots(prev => {
+        const seen = new Set(prev.map(p => p.url));
+        return [...prev, ...list.filter(x => !seen.has(x.url))].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 9);
+      });
+    }).catch(() => {});
   }, [clientId]);
 
   useEffect(() => {
@@ -1099,7 +1160,8 @@ export default function App() {
     }) });
     callGas(params).catch(err => console.warn(err));
     
-    if (refCode) {
+    // Máy chủ đã ghi sổ hoa hồng (admin bật) → không tính thêm ở trình duyệt khách, tránh ghi trùng
+    if (refCode && !ctvLedgerOnRef.current) {
       calculateVideoCommission(packageId, refCode);
     }
   };
@@ -2021,6 +2083,37 @@ export default function App() {
     }
   };
 
+  /** Bộ ảnh phối cảnh: gọi máy chủ vẽ 1 ảnh theo góc 3D + phong cách đã chốt; trả ảnh đã nén */
+  const requestPerspectiveImage = async (r: RenderRequest): Promise<RenderResult> => {
+    const toPart = (url?: string) => { const m = String(url || '').match(/^data:(image\/[a-z+]+);base64,(.+)$/); return m ? { mimeType: m[1], data: m[2] } : null; };
+    // ảnh đã lưu trên máy chủ (link) → tải về để gửi kèm
+    const asData = async (url?: string) => {
+      if (!url || url.startsWith('data:')) return url;
+      try { const b = await (await fetch(url)).blob(); return await new Promise<string>(res => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.readAsDataURL(b); }); } catch { return undefined; }
+    };
+    const refs = r.useReferences ? (constructionInfo.referenceImages || []).slice(0, r.styleImage ? 2 : 3).map(toPart).filter(Boolean) : [];
+    const styleData = await asData(r.styleImage);
+    const res = await fetch("/api/generate-concept-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(isAdminAuthenticated ? { "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" } : {}) },
+      body: JSON.stringify({ prompt: buildHouseBrief(), view: r.view, style: r.style, extra: r.extra, referenceImages: refs, massingImage: toPart(r.massingImage), styleImage: toPart(styleData), shotLabel: r.shotLabel, loai_phong: r.roomBrief || '', lang, clientId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.imageUrl) throw new Error(data.error || `Chưa tạo được ảnh (mã lỗi ${res.status}). Vui lòng thử lại sau.`);
+    const small = await compressImage(data.imageUrl);
+    return { url: await uploadPerspective(small, { label: r.shotLabel, style: r.style, view: r.view }), quota: data.quota };
+  };
+  /** Phòng nội thất cho bộ ảnh: lấy từ ô "Yêu cầu từng phòng" (kích thước gia chủ nhập), không có thì theo mặt bằng */
+  const interiorRooms: InteriorRoom[] = useMemo(() => {
+    const ct: any = constructionInfo || {};
+    const want = ['khach', 'bep', 'ngu_1', 'tho', 'ngu_2', 'lam_viec'];
+    return listRoomSlots(ct).filter(x => want.includes(x.key)).sort((a, b) => want.indexOf(a.key) - want.indexOf(b.key)).map(x => {
+      const sp = specOf(ct, x.key);
+      const size = sp.dai && sp.rong ? `${sp.dai}×${sp.rong}m` : 'kích thước theo mặt bằng';
+      return { key: x.key, label: x.label, brief: `${x.label} (${size}, tầng ${sp.tang || x.defaultTang}${sp.huong ? ', cửa sổ hướng ' + sp.huong : ''}${sp.ghi_chu ? ', yêu cầu: ' + sp.ghi_chu : ''})` };
+    });
+  }, [constructionInfo]);
+
   const handleUpdateCrmStatus = async (leadId: string, newStatus: string) => {
     try {
       const saved = localStorage.getItem("yohu_crm_leads");
@@ -2870,7 +2963,7 @@ ${totalPages >= 3 ? `
             </div>
 
             {/* TABS */}
-            <div className="flex gap-2 border-b border-slate-800 mb-6">
+            <div className="flex gap-2 border-b border-slate-800 mb-6 overflow-x-auto">
               <button onClick={() => setActiveAdminTab('leads')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'leads' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 {lang === 'vi' ? 'CRM Leads' : lang === 'lo' ? 'ລາຍຊື່ລູກຄ້າ CRM' : lang === 'zh' ? '客户档案 CRM' : 'CRM Leads'}
               </button>
@@ -2886,8 +2979,12 @@ ${totalPages >= 3 ? `
               <button onClick={() => setActiveAdminTab('samples')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'samples' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 🖼️ Mẫu thiết kế
               </button>
+              <button onClick={() => setActiveAdminTab('settings')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'settings' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
+                ⚙️ Cài đặt
+              </button>
             </div>
             {activeAdminTab === 'samples' && <AdminDesignManager />}
+            {activeAdminTab === 'settings' && <AdminSettingsPanel />}
 
             {activeAdminTab === 'leads' && (
               <CrmDashboard 
@@ -3151,130 +3248,9 @@ ${totalPages >= 3 ? `
               );
             })()}
 
-            {activeAdminTab === 'commissions' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-800 border-b border-slate-700">
-                      <th className="p-3">CTV / B2B</th>
-                      <th className="p-3">Gói</th>
-                      <th className="p-3">Hoa Hồng</th>
-                      <th className="p-3">Trạng Thái</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {(commissions || []).map(com => (
-                      <tr key={com.id}>
-                        <td className="p-3">{com.refCode}</td>
-                        <td className="p-3">{com.packageId}</td>
-                        <td className="p-3 text-emerald-500 font-bold font-mono">{formatCurrency(com.amount, lang)}</td>
-                        <td className="p-3">
-                          <select 
-                            value={com.status}
-                            onChange={(e) => updateCommissionStatus(com.id, e.target.value)}
-                            className="bg-slate-800 border border-slate-700 text-slate-200 rounded p-1 text-xs"
-                          >
-                            <option value="Chờ duyệt">Chờ duyệt</option>
-                            <option value="Đã thanh toán">Đã thanh toán</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                    {(commissions || []).length === 0 && <tr><td colSpan={4} className="p-6 text-center text-slate-500">Chưa có hoa hồng phát sinh.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {activeAdminTab === 'commissions' && <CtvManager tab="ledger" ledgerOn={ctvLedgerOn} />}
 
-            {activeAdminTab === 'ctv' && (
-              <div className="overflow-x-auto space-y-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-slate-400">Quản lý danh sách CTV / B2B Đối Tác / B2B VIP và cấu hình % hoa hồng thỏa thuận</span>
-                  <button 
-                    onClick={() => {
-                      const newCode = prompt("Nhập mã CTV mới (ví dụ CTV002, B2B02):");
-                      if (newCode) {
-                        const newPartner = { ma_ctv: newCode, loai_doi_tac: "CTV Thường", hh_thoa_thuan: 0 };
-                        const updated = [...ctvPartners, newPartner];
-                        setCtvPartners(updated);
-                        localStorage.setItem("yohu_ctv_partners", JSON.stringify(updated));
-                        
-                        fetch("/api/ctv-partners", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json", "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" },
-                          body: JSON.stringify(newPartner)
-                        }).catch(console.error);
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded cursor-pointer"
-                  >
-                    + Thêm CTV mới
-                  </button>
-                </div>
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-800 border-b border-slate-700">
-                      <th className="p-3">Mã CTV</th>
-                      <th className="p-3">Loại Đối Tác (loai_doi_tac)</th>
-                      <th className="p-3">% HH Thỏa Thuận (B2B VIP)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {ctvPartners.map((partner, idx) => (
-                      <tr key={partner.ma_ctv || idx}>
-                        <td className="p-3 font-mono font-bold text-amber-400">{partner.ma_ctv}</td>
-                        <td className="p-3">
-                          <select
-                            value={partner.loai_doi_tac}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              const updated = [...ctvPartners];
-                              updated[idx].loai_doi_tac = val;
-                              setCtvPartners(updated);
-                              localStorage.setItem("yohu_ctv_partners", JSON.stringify(updated));
-                              fetch("/api/ctv-partners", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json", "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" },
-                                body: JSON.stringify(updated[idx])
-                              }).catch(console.error);
-                            }}
-                            className="bg-slate-800 border border-slate-700 text-slate-200 rounded p-1.5 text-xs"
-                          >
-                            <option value="CTV Thường">CTV Thường</option>
-                            <option value="B2B Đối Tác">B2B Đối Tác</option>
-                            <option value="B2B VIP">B2B VIP</option>
-                          </select>
-                        </td>
-                        <td className="p-3">
-                          {partner.loai_doi_tac === 'B2B VIP' ? (
-                            <input
-                              type="number"
-                              value={partner.hh_thoa_thuan}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                const updated = [...ctvPartners];
-                                updated[idx].hh_thoa_thuan = val;
-                                setCtvPartners(updated);
-                                localStorage.setItem("yohu_ctv_partners", JSON.stringify(updated));
-                                fetch("/api/ctv-partners", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json", "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" },
-                                  body: JSON.stringify(updated[idx])
-                                }).catch(console.error);
-                              }}
-                              className="w-24 bg-slate-800 border border-slate-700 text-slate-200 rounded p-1 text-xs font-mono"
-                              placeholder="VD: 30"
-                            />
-                          ) : (
-                            <span className="text-slate-500 text-xs italic">Không áp dụng</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {activeAdminTab === 'ctv' && <CtvManager tab="partners" ledgerOn={ctvLedgerOn} />}
 
             {activeAdminTab === 'perspective' && (
               <PerspectiveImageUploader 
@@ -4111,7 +4087,8 @@ ${totalPages >= 3 ? `
                                 theme={theme}
                                 customerName={userInfo?.name}
                                 shots={perspectiveShots}
-                                videoUrl={activeCustomerLead?.link_video_phoi_canh || ""}
+                                videoUrl={activeCustomerLead?.link_video_phoi_canh || serverVideoUrl || ""}
+                                localVideo={localVideo}
                                 onOpen3D={() => { setActiveDrawingTab('massing'); scrollToId('yohu-drawings'); }}
                                 onOpenPlan={() => { setActiveDrawingTab('floorplan'); scrollToId('yohu-drawings'); }}
                                 onOpenStudio={() => scrollToId('yohu-perspective')}
@@ -4134,11 +4111,15 @@ ${totalPages >= 3 ? `
                                 <PerspectiveStudio
                                   theme={theme}
                                   referenceImages={constructionInfo.referenceImages || []}
-                                  massingSnapshot={massingSnapshot}
-                                  imageRendering={imageRendering}
-                                  renderedConceptImage={renderedConceptImage}
-                                  conceptError={conceptError}
-                                  onGenerate={(o) => triggerRenderConceptImage(o)}
+                                  massingShots={massingShots}
+                                  interiorRooms={interiorRooms}
+                                  storageKey={`yohu_studio_${clientId || 'guest'}_${massingLockedAt || 'none'}`}
+                                  requestImage={requestPerspectiveImage}
+                                  onShot={(sh: StudioShot) => setPerspectiveShots(prev => {
+                                    const next = [{ url: sh.url, style: sh.style, view: sh.view, label: sh.label, at: new Date().toISOString() }, ...prev.filter(p => p.url !== sh.url)].slice(0, 9);
+                                    try { localStorage.setItem(shotsKey(), JSON.stringify(next)); } catch { /* đầy bộ nhớ */ }
+                                    return next;
+                                  })}
                                   onOpenMassing={() => { setActiveDrawingTab('massing'); setTimeout(() => document.getElementById('yohu-drawings')?.scrollIntoView({ behavior: 'smooth' }), 100); }}
                                   setZoomImage={setZoomImage}
                                   packageTier={goiKichHoat}
@@ -4168,7 +4149,7 @@ ${totalPages >= 3 ? `
                                       : theme === 'dark' ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                                   }`}
                                 >
-                                  🏛️ Mặt Cắt Đứng (Elevation)
+                                  🏛️ Mặt Đứng & Mặt Cắt
                                 </button>
                                 <button
                                   onClick={() => setActiveDrawingTab('massing')}
@@ -4197,6 +4178,9 @@ ${totalPages >= 3 ? `
                                     backSetbackM={setbacksFor(constructionInfo).back}
                                     roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
                                     onSnapshot={(url) => setMassingSnapshot(url)}
+                                    onLockMassing={handleLockMassing}
+                                    lockedAt={massingLockedAt}
+                                    onVideoReady={(url, ext) => setLocalVideo({ url, ext })}
                                   />
                                 </React.Suspense>
                               ) : activeDrawingTab === 'floorplan' ? (
@@ -4220,6 +4204,12 @@ ${totalPages >= 3 ? `
                                   dimensions={planDimsFor(constructionInfo)}
                                   floors={parseInt(constructionInfo.floors) || 2}
                                   constructionType={constructionInfo.constructionType}
+                                  rooms={roomsFor(constructionInfo)}
+                                  fengShuiAnalysis={fengShuiAnalysis}
+                                  desiredDirection={userInfo?.desiredDirection}
+                                  frontSetbackM={setbacksFor(constructionInfo).front}
+                                  backSetbackM={setbacksFor(constructionInfo).back}
+                                  roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
                                   theme={theme}
                                   lang={lang}
                                   customerName={userInfo?.name || "Khách Hàng"}
@@ -4626,8 +4616,20 @@ ${totalPages >= 3 ? `
                           <Massing3DViewer dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
                             customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
                             frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
-                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} onSnapshot={(url) => setMassingSnapshot(url)} />
+                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} onSnapshot={(url) => setMassingSnapshot(url)}
+                            onLockMassing={handleLockMassing} lockedAt={massingLockedAt} onVideoReady={(url, ext) => setLocalVideo({ url, ext })} />
                         </React.Suspense>
+                      </div>
+                    ) : freePreview3D ? (
+                      <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'bg-[#121829]/50 border-purple-500/30' : 'bg-purple-50/50 border-purple-200'}`}>
+                        <div className="text-sm font-extrabold mb-1">🏠 Xem thử 3D ngôi nhà của anh/chị</div>
+                        <React.Suspense fallback={<div className="p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
+                          <Massing3DViewer preview dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
+                            customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
+                            frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
+                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} />
+                        </React.Suspense>
+                        <button onClick={() => requestPackage('design')} className="mt-3 px-4 py-2.5 rounded-xl bg-purple-600 text-white text-xs font-black cursor-pointer">Mở gói Thiết kế — chốt hình khối, ảnh phối cảnh, video, bản vẽ</button>
                       </div>
                     ) : (
                       <div className={`p-4 rounded-2xl border-2 border-dashed text-center ${theme === 'dark' ? 'border-purple-500/30 bg-[#101524]' : 'border-purple-300 bg-purple-50'}`}>
@@ -4783,6 +4785,7 @@ ${totalPages >= 3 ? `
         </div>
       )}
 
+      {showCtvPortal && <CtvPortal onClose={() => setShowCtvPortal(false)} />}
       {/* CTV DASHBOARD MODAL */}
       {showCTVDashboard && (
         <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4 animate-fade-in-up overflow-y-auto">
