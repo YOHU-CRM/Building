@@ -1177,12 +1177,46 @@ app.get("/api/mau-thiet-ke", async (req, res) => {
 });
 
 // Config endpoint to share GAS URL with frontend
-app.get("/api/config", (req, res) => {
+/* ── Cài đặt vận hành do admin bật/tắt (lưu Firestore config/app_settings; không có Firestore thì giữ trong bộ nhớ) ── */
+const DEFAULT_APP_SETTINGS = {
+  videoOrderEnabled: true,     // khách được xem & đặt gói video
+  videoAutoDispatch: false     // gửi tự động sang Video Studio (tốn tín dụng API) — mặc định TẮT: admin dựng video thủ công
+};
+let appSettingsCache: typeof DEFAULT_APP_SETTINGS | null = null;
+async function getAppSettings() {
+  if (appSettingsCache) return appSettingsCache;
+  let s = { ...DEFAULT_APP_SETTINGS };
+  try {
+    if (firestoreDb) {
+      const doc: any = await withTimeout(firestoreDb.collection("config").doc("app_settings").get(), 4000);
+      if (doc?.exists) s = { ...s, ...(doc.data() || {}) };
+    }
+  } catch (e: any) { console.warn("[settings] read:", e?.message || e); }
+  appSettingsCache = s;
+  return s;
+}
+app.get("/api/admin/settings", adminAuthMiddleware, async (_req, res) => res.json({ ok: true, settings: await getAppSettings() }));
+app.post("/api/admin/settings", adminAuthMiddleware, async (req, res) => {
+  const cur = await getAppSettings();
+  const next = { ...cur };
+  (Object.keys(DEFAULT_APP_SETTINGS) as (keyof typeof DEFAULT_APP_SETTINGS)[]).forEach(k => { if (typeof req.body?.[k] === "boolean") next[k] = req.body[k]; });
+  appSettingsCache = next;
+  let saved = false;
+  try {
+    if (firestoreDb) { await withTimeout(firestoreDb.collection("config").doc("app_settings").set(next, { merge: true }), 5000); saved = true; }
+  } catch (e: any) { console.warn("[settings] write:", e?.message || e); }
+  res.json({ ok: true, settings: next, persisted: saved, note: saved ? "" : "Chưa có Firestore: cài đặt chỉ giữ đến khi máy chủ khởi động lại." });
+});
+
+app.get("/api/config", async (req, res) => {
   // Không trả địa chỉ Apps Script thật cho trình duyệt — chỉ trả đường dẫn proxy nội bộ
+  const st = await getAppSettings();
   res.json({
     gasUrl: getGasUrl() ? "/api/gas-proxy" : "",
     hotline: (process.env.HOTLINE || "0973 480 488").trim(),
-    bankInfo: (process.env.BANK_INFO || "").trim()
+    bankInfo: (process.env.BANK_INFO || "").trim(),
+    videoOrderEnabled: st.videoOrderEnabled,
+    videoAutoDispatch: st.videoAutoDispatch
   });
 });
 
@@ -2711,6 +2745,10 @@ app.post("/api/admin/dispatch-video", adminAuthMiddleware, async (req, res) => {
 
     if (!projectId) {
       return res.status(400).json({ error: "Missing projectId" });
+    }
+    const st = await getAppSettings();
+    if (!st.videoAutoDispatch) {
+      return res.status(409).json({ success: false, reason: "AUTO_OFF", error: "Admin đang TẮT gửi tự động sang Video Studio (để không tốn tín dụng API). Dựng video thủ công rồi bấm 'Dán link video' để giao cho khách, hoặc bật lại công tắc trong tab Video." });
     }
 
     const envUrl = (process.env.VIDEO_STUDIO_URL || "").trim();
