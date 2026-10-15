@@ -64,7 +64,7 @@ import DesignTemplateGallery from "./components/DesignTemplateGallery";
 import PerspectiveImageUploader from "./components/PerspectiveImageUploader";
 import FloorPlan2DViewer from "./components/FloorPlan2DViewer";
 import PerspectiveStudio, { PerspectiveOptions } from "./components/PerspectiveStudio";
-import { computeSiteFor } from "./lib/siteGeometry";
+import { computeSiteFor, setbacksFor, roomsFor } from "./lib/siteGeometry";
 // 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
 const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
 import ElevationViewer from "./components/ElevationViewer";
@@ -746,6 +746,10 @@ export default function App() {
       luckyNumbers: calc.luckyNumbers,
       targetYear: calc.targetYear,
       borrowAgeCandidates: calc.borrowAgeCandidates,
+      borrowAgeDetails: calc.borrowAgeDetails,
+      auspiciousDays: calc.auspiciousDays,
+      spouseAdvice: calc.spouseAdvice,
+      menhQuaiExplain: calc.menhQuaiExplain,
       directionVerdict: calc.directionVerdict,
       isLocal: true
     };
@@ -1360,10 +1364,15 @@ export default function App() {
     const wF = parseFloat(String(kd.rong_truoc ?? '').replace(',', '.')), wB = parseFloat(String(kd.rong_sau ?? '').replace(',', '.')), dL = parseFloat(String(kd.dai ?? '').replace(',', '.'));
     const avgW = !isNaN(wF) && wF > 0 ? (!isNaN(wB) && wB > 0 ? Math.round((wF + wB) / 2 * 10) / 10 : wF) : NaN;
     const dimsFromLot = !isNaN(avgW) && !isNaN(dL) && dL > 0 ? `${avgW}x${dL}` : '';
+    // Ưu tiên kích thước NHÀ XÂY (mô tả của gia chủ > bản vẽ); kích thước đất chỉ dùng khi không có số đo nhà
+    const kn = data.kich_thuoc_nha || {};
+    const hw = parseFloat(String(kn.rong ?? '').replace(',', '.')), hl = parseFloat(String(kn.dai ?? '').replace(',', '.'));
+    const dimsFromHouse = hw > 0 && hl > 0 ? `${hw}x${hl}` : '';
     setConstructionInfo((prev: any) => ({
       ...prev,
       constructionType: data.loai_ct || prev.constructionType,
-      dimensions: dimsFromLot || data.dien_tich || prev.dimensions,
+      dimensions: dimsFromHouse || dimsFromLot || data.dien_tich || prev.dimensions,
+      dimensionsKind: dimsFromHouse ? 'nha' : dimsFromLot ? 'dat' : (prev as any).dimensionsKind,
       soilType: data.loai_dat && data.loai_dat !== 'chua_biet' ? data.loai_dat : prev.soilType,
       frontSetbackM: data.khoang_lui_truoc ?? prev.frontSetbackM,
       backSetbackM: data.khoang_lui_sau ?? prev.backSetbackM,
@@ -2102,6 +2111,10 @@ export default function App() {
           luckyNumbers: calc.luckyNumbers,
           targetYear: calc.targetYear,
           borrowAgeCandidates: calc.borrowAgeCandidates,
+          borrowAgeDetails: calc.borrowAgeDetails,
+          auspiciousDays: calc.auspiciousDays,
+          spouseAdvice: calc.spouseAdvice,
+          menhQuaiExplain: calc.menhQuaiExplain,
           directionVerdict: calc.directionVerdict,
           isLocal: true
         };
@@ -2139,9 +2152,9 @@ export default function App() {
         showFurniture: true,
         desiredDirection: desiredDirection,
         fengShuiAnalysis: fs,
-        rooms: ct?.rooms,
-        frontSetbackM: ct?.frontSetbackM,
-        backSetbackM: ct?.backSetbackM
+        rooms: roomsFor(ct),
+        frontSetbackM: setbacksFor(ct).front,
+        backSetbackM: setbacksFor(ct).back
       });
       const archSvgDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(archSvg)}`;
 
@@ -4062,6 +4075,7 @@ ${totalPages >= 3 ? `
                               packageTier={goiKichHoat}
                               onUpgradePackage={(tier) => requestPackage(tier)}
                               link_anh_phoi_canh={activeCustomerLinkAnh}
+                              onRedeemCode={handleApplyActivationCode}
                               perspectiveSlot={
                                 <PerspectiveStudio
                                   theme={theme}
@@ -4119,14 +4133,14 @@ ${totalPages >= 3 ? `
                                   <Massing3DViewer
                                     dimensions={constructionInfo.dimensions}
                                     floors={parseInt(constructionInfo.floors) || 2}
-                                    rooms={constructionInfo.rooms}
+                                    rooms={roomsFor(constructionInfo)}
                                     theme={theme}
                                     lang={lang}
                                     customerName={userInfo?.name || "Khách Hàng"}
                                     fengShuiAnalysis={fengShuiAnalysis}
                                     desiredDirection={userInfo?.desiredDirection}
-                                    frontSetbackM={(constructionInfo as any).frontSetbackM}
-                                    backSetbackM={(constructionInfo as any).backSetbackM}
+                                    frontSetbackM={setbacksFor(constructionInfo).front}
+                                    backSetbackM={setbacksFor(constructionInfo).back}
                                     roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
                                     onSnapshot={(url) => setMassingSnapshot(url)}
                                   />
@@ -4136,15 +4150,15 @@ ${totalPages >= 3 ? `
                                   dimensions={constructionInfo.dimensions}
                                   floors={parseInt(constructionInfo.floors) || 2}
                                   constructionType={constructionInfo.constructionType}
-                                  rooms={constructionInfo.rooms}
+                                  rooms={roomsFor(constructionInfo)}
                                   theme={theme}
                                   lang={lang}
                                   customerName={userInfo?.name || "Khách Hàng"}
                                   onExportSvgDataUrl={(url) => setFloorPlanSvgUrl(url)}
                                   fengShuiAnalysis={fengShuiAnalysis}
                                   desiredDirection={userInfo?.desiredDirection}
-                                  frontSetbackM={(constructionInfo as any).frontSetbackM}
-                                  backSetbackM={(constructionInfo as any).backSetbackM}
+                                  frontSetbackM={setbacksFor(constructionInfo).front}
+                                  backSetbackM={setbacksFor(constructionInfo).back}
                                   onToggleAdvice={(apply) => setConstructionInfo((prev: any) => ({ ...prev, rooms: { ...(prev.rooms || {}), applyAdvice: apply } }))}
                                 />
                               ) : (

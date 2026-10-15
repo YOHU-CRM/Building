@@ -27,6 +27,10 @@ export interface FengShuiAnalysis {
   isLocal?: boolean; // Flag to identify if the analysis was generated locally
   targetYear?: number; // Năm khởi công dùng để xét hạn
   borrowAgeCandidates?: number[]; // Năm sinh có thể mượn tuổi
+  borrowAgeDetails?: { year: number; canChi: string; why: string }[];
+  auspiciousDays?: { solar: string; weekday: string; lunar: string; dayCanChi: string; than: string; hours: string[]; note: string }[];
+  spouseAdvice?: string[];
+  menhQuaiExplain?: string;
   directionVerdict?: {
     direction: string;
     star: string;
