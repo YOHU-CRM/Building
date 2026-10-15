@@ -444,7 +444,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   });
   y += 8;
   if (plan.sketchNotes && plan.sketchNotes.length) {
-    head('THEO PHÁC THẢO CỦA GIA CHỦ');
+    head('THEO YÊU CẦU / PHÁC THẢO CỦA GIA CHỦ');
     plan.sketchNotes.forEach(n => { line(n, n.startsWith('↺') ? '#b45309' : n.startsWith('?') ? '#7c3aed' : '#15803d'); y += 2; });
     y += 6;
   }

@@ -119,6 +119,47 @@ const MIN: Record<string, { area: number; width: number }> = {
   kitchen: { area: 6, width: 1.8 }, wc: { area: 2.4, width: 1.2 }, worship: { area: 4.5, width: 1.8 }, common: { area: 6, width: 2.2 }, dining: { area: 6, width: 2.2 }
 };
 
+/** Phòng do tool tự đặt (gia chủ không chọn vị trí): đổi chỗ cho hợp phong thủy Bát Trạch trên lưới 3×3.
+ *  WC, bếp → cung xấu (tọa hung); phòng ngủ, phòng thờ, làm việc → cung tốt; bếp & thờ ưu tiên phía sau. */
+function optimizeAutoCells(srs: { loai: string; r0: number; c0: number; rs: number; cs: number; raw: any }[], R: number, C: number, facingRaw: string | undefined, fs: any): string[] {
+  if (R !== 3 || C !== 3) return [];
+  const facing = parseDir(facingRaw) || 'Nam';
+  const D = dirDeg(facing);
+  const sm = starMapOf(fs);
+  if (!Object.keys(sm).length) return [];
+  const score = (r: number, c: number) => {
+    if (r === 1 && c === 1) return 0;
+    const d = degDir(Math.atan2(c - 1, r - 1) * 180 / Math.PI + D - 180);
+    const i = sm[d]; if (!i) return 0;
+    return STAR_RANK[i.star] ?? (i.good ? 1 : -1);
+  };
+  const auto = srs.filter(s => s.raw?.nguon === 'tu_dong' && s.rs === 1 && s.cs === 1 && ['wc', 'bep', 'ngu', 'tho', 'lam_viec'].includes(s.loai));
+  if (auto.length < 2 || auto.length > 7) return [];
+  const cells = auto.map(s => [s.r0, s.c0] as [number, number]);
+  const val = (loai: string, r: number, c: number) => {
+    const sc = score(r, c);
+    const base = loai === 'wc' ? -sc * 1.5 : loai === 'bep' ? -sc : loai === 'tho' ? sc * 2.5 : sc;
+    return base + ((loai === 'bep' || loai === 'tho') && r === 2 ? 1.5 : 0) + (loai === 'wc' && r === 1 && c === 1 ? -10 : 0);
+  };
+  let best = cells.map((_, i) => i), bestV = -1e9;
+  const perm = (arr: number[], k: number) => {
+    if (k === arr.length) {
+      let v = arr.reduce((t, ci, i) => t + val(auto[i].loai, cells[ci][0], cells[ci][1]), 0);
+      // phòng thờ không chung vách WC
+      const pos = (l: string) => auto.map((a, i) => a.loai === l ? cells[arr[i]] : null).filter(Boolean) as [number, number][];
+      pos('tho').forEach(([r1_, c1_]) => pos('wc').forEach(([r2, c2]) => { if (Math.abs(r1_ - r2) + Math.abs(c1_ - c2) === 1) v -= 3; }));
+      if (v > bestV) { bestV = v; best = arr.slice(); }
+      return;
+    }
+    for (let i = k; i < arr.length; i++) { [arr[k], arr[i]] = [arr[i], arr[k]]; perm(arr, k + 1); [arr[k], arr[i]] = [arr[i], arr[k]]; }
+  };
+  perm(cells.map((_, i) => i), 0);
+  const notes: string[] = [];
+  auto.forEach((s, i) => { const [r, c] = cells[best[i]]; if (r !== s.r0 || c !== s.c0) { s.r0 = r; s.c0 = c; } });
+  if (bestV > -1e9) notes.push(`✓ ${auto.length} phòng gia chủ chưa chọn vị trí đã được tool xếp theo cung mệnh: WC, bếp vào cung xấu; phòng ngủ, phòng thờ vào cung tốt.`);
+  return notes;
+}
+
 /** Có dùng chế độ phác thảo tự do cho tầng này không */
 export function hasFreeSketch(rooms: any, floor: number, totalFloors: number): boolean {
   const sk = rooms?.sketchLayout;
@@ -154,6 +195,7 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     }));
   const R = Math.max(Number(sk.luoi?.so_hang) || 0, ...srs.map(s => s.r0 + s.rs));
   const C = Math.max(Number(sk.luoi?.so_cot) || 0, ...srs.map(s => s.c0 + s.cs));
+  optimizeAutoCells(srs, R, C, input.desiredDirection || sk.huong_mat_tien || fs?.directionVerdict?.direction, fs).forEach(t => sketchNotes.push(t));
   // chống trùng ô: phòng có diện tích lớn giữ trước
   const occ: (number | null)[][] = Array.from({ length: R }, () => Array(C).fill(null));
   const kept: SR[] = [];
@@ -178,15 +220,22 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
 
   /* ── 2. Kích thước cột / hàng từ diện tích ghi tay ── */
   // Ưu tiên: số đo nhà trong MÔ TẢ / ô nhập của gia chủ > số ghi trên bản vẽ tay (bản vẽ chỉ để tham chiếu bố trí)
-  const dimsHouse = input.rooms?.dimsKind !== 'dat' && Number(input.widthM) > 0 && Number(input.lengthM) > 0;
-  const Hfix = dimsHouse ? Number(input.lengthM) : num(sk.nha?.sau);
-  const Wfix = dimsHouse ? Number(input.widthM) : num(sk.nha?.rong);
+  const hasDims = Number(input.widthM) > 0 && Number(input.lengthM) > 0;
+  const isLot = input.rooms?.dimsKind === 'dat';
+  // thửa đất: nhà = ngang (đã trừ lùi 2 bên) × (dài − lùi trước − lùi sau)
+  const Lin = Number(input.lengthM) || 0;
+  const fsIn = parseFloat(String(input.frontSetbackM ?? '')), bsIn = parseFloat(String(input.backSetbackM ?? ''));
+  const lotH = Math.max(4, Lin - (isFinite(fsIn) ? fsIn : (Lin >= 12 ? 2 : 1)) - (isFinite(bsIn) ? bsIn : (Lin >= 12 ? 1 : 0.5)));
+  const dimsHouse = hasDims;
+  const Hfix = hasDims ? (isLot ? Math.round(lotH * 10) / 10 : Lin) : num(sk.nha?.sau);
+  const Wfix = hasDims ? Number(input.widthM) : num(sk.nha?.rong);
   if (dimsHouse && (num(sk.nha?.sau) || num(sk.nha?.rong)) && (num(sk.nha?.sau) !== Hfix || num(sk.nha?.rong) !== Wfix))
     sketchNotes.push(`✓ Dùng kích thước nhà gia chủ nhập ${Wfix}×${Hfix}m; số đo trên bản vẽ tay (${num(sk.nha?.rong) || '?'}×${num(sk.nha?.sau) || '?'}m) chỉ dùng tham chiếu bố trí.`);
   const withArea = srs.filter(s => s.area);
   // Phòng không ghi diện tích: dùng diện tích tối thiểu hợp lý làm "mục tiêu mềm" để không bị ép mỏng (vd bếp 1,2m)
   const SOFT: Record<string, number> = { bep: 12, an: 12, ngu: 13, khach: 22, tho: 12, wc: 4.5, doc_sach: 12, lam_viec: 10, sinh_hoat: 14, kho: 5, gara: 18, thang: 8 };
-  const fitList = srs.map(s => ({ s, a: s.area || (SOFT[s.loai] ? SOFT[s.loai] * s.rs * s.cs / Math.max(1, s.rs * s.cs) : 0), w: s.area ? 1 : 0.6 })).filter(x => x.a > 0);
+  // phòng chiếm nhiều ô: diện tích mềm tăng theo số ô (× 0,8 mỗi ô thêm)
+  const fitList = srs.map(s => ({ s, a: s.area || (SOFT[s.loai] ? SOFT[s.loai] * (1 + 0.8 * (s.rs * s.cs - 1)) : 0), w: s.area ? 1 : 0.6 })).filter(x => x.a > 0);
   const coveredCells = srs.reduce((n, s) => n + s.rs * s.cs, 0);
   const areaSum = withArea.reduce((n, s) => n + (s.area || 0), 0);
   const areaCells = withArea.reduce((n, s) => n + s.rs * s.cs, 0);
@@ -198,7 +247,7 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   }
   let rh = Array(R).fill((H0 || (cellA ? (cellA * R * C) / (W0 || 10) : 10)) / R);
   let cw = Array(C).fill(W0 ? W0 / C : (cellA ? cellA / rh[0] : 3.5));
-  const MINC = 1.2, MINR = 1.5;
+  const MINC = 1.2, MINR = 2.4;   // hàng phòng tối thiểu 2,4m (WC, kho); cột tối thiểu 1,2m
   for (let it = 0; it < 500 && fitList.length; it++) {
     const lc = Array(C).fill(0), nc = Array(C).fill(0), lr = Array(R).fill(0), nr = Array(R).fill(0);
     fitList.forEach(({ s, a, w }) => {
@@ -208,6 +257,20 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
       const g = w * Math.log(a / (sw * sh)) / 2;
       for (let c = s.c0; c < s.c0 + s.cs; c++) { lc[c] += g; nc[c] += w; }
       for (let r = s.r0; r < s.r0 + s.rs; r++) { lr[r] += g; nr[r] += w; }
+    });
+    // Phòng gia chủ nhập kích thước: kéo bề ngang cột & chiều sâu hàng về đúng số đo (ưu tiên cao).
+    // Dài/rộng tự xoay theo dáng ô phòng (cạnh dài theo chiều dài của ô).
+    srs.forEach(s => {
+      const a = num(s.raw?.dai), b = num(s.raw?.rong);
+      if (!a || !b) return;
+      let sw = 0, sh = 0;
+      for (let c = s.c0; c < s.c0 + s.cs; c++) sw += cw[c];
+      for (let r = s.r0; r < s.r0 + s.rs; r++) sh += rh[r];
+      const big = Math.max(a, b), small = Math.min(a, b);
+      const tw = sw >= sh ? big : small, th = sw >= sh ? small : big;
+      const gw = 2 * Math.log(tw / sw), gh = 2 * Math.log(th / sh);
+      for (let c = s.c0; c < s.c0 + s.cs; c++) { lc[c] += gw; nc[c] += 2; }
+      for (let r = s.r0; r < s.r0 + s.rs; r++) { lr[r] += gh; nr[r] += 2; }
     });
     cw = cw.map((v, c) => Math.max(MINC, nc[c] ? v * Math.exp(0.5 * lc[c] / nc[c]) : v));
     rh = rh.map((v, r) => Math.max(MINR, nr[r] ? v * Math.exp(0.5 * lr[r] / nr[r]) : v));
@@ -316,7 +379,9 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   const mainSide: Side = CANH[cuaChinh?.canh] || 'front';
   if (!mainRoom || mainRoom.outside) {
     const front = inside().filter(r => ['corridor', 'living', 'common'].includes(r.type) && (r.y < EPS || rooms.some(p => p.outside && shared(r, p)?.side === 'front')));
-    mainRoom = front.sort((a, b) => (a.type === 'corridor' ? -1 : 0) - (b.type === 'corridor' ? -1 : 0) || b.w - a.w)[0] || inside().find(r => r.type === 'living') || inside()[0];
+    // ô mặt tiền có cung tốt nhất cho cửa chính (sảnh / phòng khách), rồi mới ưu tiên sảnh
+    const frontScore = (r: PlanRoom) => { const c = cellOf(r.x + r.w / 2, 0.1); return dirScore(cellDir(c.col, c.row)); };
+    mainRoom = front.sort((a, b) => frontScore(b) - frontScore(a) || (a.type === 'corridor' ? -1 : 0) - (b.type === 'corridor' ? -1 : 0) || b.w - a.w)[0] || inside().find(r => r.type === 'living') || inside()[0];
   }
   let mainDoor: PlanDoor | null = null;
   if (mainRoom) {
@@ -575,6 +640,17 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     r.windows = (r.type === 'wc' ? sides.slice(0, 1) : sides.slice(0, 2));
   });
 
+  /* ── 8b. Hướng phòng gia chủ yêu cầu (ô nhập từng phòng) ── */
+  (Array.isArray(sk.ghi_chu_o_nhap) ? sk.ghi_chu_o_nhap : []).forEach((t: string) => sketchNotes.push(`? ${t}`));
+  (Array.isArray(sk.huong_phong) ? sk.huong_phong : []).forEach((h: any) => {
+    const room = rooms.find(r => meta.get(r)?.ten === h.ten);
+    if (!room || !h.huong) return;
+    const sides = (['front', 'rear', 'left', 'right'] as Side[]).filter(sd => isExteriorSeg(room, sd).length);
+    const okSide = sides.find(sd => sideBearing(sd) === h.huong);
+    if (okSide) { if (!room.windows.includes(okSide)) room.windows = [...room.windows, okSide].slice(-2); sketchNotes.push(`✓ ${h.ten}: cửa sổ hướng ${h.huong} như yêu cầu.`); }
+    else sketchNotes.push(`? ${h.ten}: yêu cầu hướng ${h.huong}, nhưng vị trí hiện tại chỉ có tường ngoài hướng ${sides.map(sideBearing).join(', ') || '(không có)'} — anh/chị đổi vị trí phòng hoặc hướng.`);
+  });
+
   /* ── 9. Hiên trước, bếp phụ, giếng, ao, vườn, lối vào ── */
   const extras: PlanRoom[] = [];
   const hien = sk.hien || {};
@@ -800,7 +876,9 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     const s = meta.get(r);
     if (s?.area) {
       const a = r.w * r.h, dev = Math.abs(a - s.area) / s.area;
-      if (dev > 0.15) sketchNotes.push(`↺ ${r.name.split(' (')[0]}: ghi ${s.area}m², vẽ ra ${r1(a)}m² để khớp các phòng cạnh bên.`);
+      if (dev > 0.15) sketchNotes.push(sk.nguon === 'o_nhap'
+        ? `? ${r.name.split(' (')[0]}: yêu cầu ${num(s.raw?.rong) && num(s.raw?.dai) ? `${s.raw.dai}×${s.raw.rong}m = ` : ''}${s.area}m², vẽ được ${r.w}×${r.h}m = ${r1(a)}m² (tổng các phòng phải vừa nhà ${W}×${H}m) — anh/chị chỉnh kích thước hoặc vị trí phòng.`
+        : `↺ ${r.name.split(' (')[0]}: ghi ${s.area}m², vẽ ra ${r1(a)}m² để khớp các phòng cạnh bên.`);
       else keptArea++;
     }
     const key = r.type === 'master' ? 'master' : r.type;
@@ -814,9 +892,10 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   });
   const ratio = W / H;
   if (withArea.length && (ratio > 3 || ratio < 0.33)) sketchNotes.push(`? Nhà ${W} × ${H} m khá ${ratio > 3 ? 'dài ngang' : 'hẹp'}: tổng diện tích ghi tay ~${Math.round(areaSum)}m²${Hfix ? ` với chiều sâu ${Hfix}m` : ''}. Anh/chị kiểm tra lại số đo hoặc diện tích ghi trên bản vẽ.`);
-  sketchNotes.unshift(`✓ Vẽ theo phác thảo tự do: giữ đúng vị trí ${srs.length} phòng (lưới ${R} hàng × ${C} cột)${withArea.length ? `, ${keptArea}/${withArea.length} phòng khớp diện tích ghi tay (±15%)` : ''}.`);
+  if (sk.nguon === 'o_nhap') sketchNotes.unshift(`✓ Bố trí theo YÊU CẦU TỪNG PHÒNG của gia chủ: ${srs.filter(s => s.raw?.nguon === 'gia_chu').length} phòng đúng vị trí gia chủ chọn, ${srs.filter(s => s.raw?.nguon === 'tu_dong').length} phòng tool tự đặt.`);
+  else sketchNotes.unshift(`✓ Vẽ theo phác thảo tự do: giữ đúng vị trí ${srs.length} phòng (lưới ${R} hàng × ${C} cột)${withArea.length ? `, ${keptArea}/${withArea.length} phòng khớp diện tích ghi tay (±15%)` : ''}.`);
   sketchNotes.unshift(dimsHouse
-    ? `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập; bản vẽ tay chỉ dùng để xếp vị trí phòng${withArea.length ? ' (diện tích ghi tay quy đổi theo tỷ lệ)' : ''}.`
+    ? (sk.nguon === 'o_nhap' ? `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập.` : `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập; bản vẽ tay chỉ dùng để xếp vị trí phòng${withArea.length ? ' (diện tích ghi tay quy đổi theo tỷ lệ)' : ''}.`)
     : `✓ Nhà ${W} × ${H} m${Hfix ? ` (chiều sâu ${Hfix}m theo phác thảo)` : ''}${Wfix ? ` (chiều ngang ${Wfix}m theo phác thảo)` : ''}${!Hfix && !Wfix && withArea.length ? ' — suy ra từ diện tích ghi trên bản vẽ' : ''}; phần đất còn lại làm sân vườn.`);
   (Array.isArray(sk.doc_khong_ro) ? sk.doc_khong_ro : []).slice(0, 4).forEach((t: any) => sketchNotes.push(`? Chưa đọc rõ: "${t}" — anh/chị kiểm tra lại phiếu.`));
   srs.filter(s => s.conf < 0.6).forEach(s => sketchNotes.push(`? "${s.ten || s.loai}" AI đọc chưa chắc — anh/chị kiểm tra lại.`));

@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import { setbacksFor, roomsFor } from './siteGeometry';
+import { setbacksFor, roomsFor, planDimsFor } from './siteGeometry';
 import html2canvas from 'html2canvas';
 import { UserInfo, ConstructionInfo } from '../types';
 import { StructuralOption } from '../data/structuralOptions';
@@ -43,7 +43,7 @@ export async function exportSpecificationToPdf({
   const birthYear = userInfo?.birthDate ? new Date(userInfo.birthDate).getFullYear() : 1979;
   const gender = userInfo?.gender || 'nam';
   const desiredDirection = userInfo?.desiredDirection || 'Nam';
-  const dim = constructionInfo?.dimensions || '10x18.6';
+  const dim = planDimsFor(constructionInfo) || '10x18.6';
   const floors = Math.max(1, constructionInfo?.floors || 1);
   const userBudget = constructionInfo?.totalBudget;
   const budgetUnit = constructionInfo?.budgetUnit || 'VNĐ';
