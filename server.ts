@@ -64,6 +64,51 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+/* ══════════════ NHẬT KÝ LỖI (admin xem ở tab "🧯 Lỗi gần đây") ══════════════ */
+const errorRing: any[] = [];
+function logError(source: string, message: string, meta: Record<string, any> = {}) {
+  const e = { source, message: String(message || "").slice(0, 600), meta: JSON.parse(JSON.stringify(meta || {}, (_k, v) => typeof v === "string" ? v.slice(0, 300) : v)), at: new Date().toISOString() };
+  errorRing.unshift(e); if (errorRing.length > 300) errorRing.length = 300;
+  if (firestoreDb) firestoreDb.collection("errorLogs").add(e).catch(() => {});
+}
+// mọi phản hồi lỗi ≥ 500 của máy chủ tự ghi vào nhật ký
+app.use((req: any, res: any, next: any) => {
+  const json = res.json.bind(res);
+  res.json = (body: any) => { if (body && typeof body === "object" && body.error) res.locals.errMsg = body.error; return json(body); };
+  res.on("finish", () => {
+    if (res.statusCode >= 500 && String(req.path).startsWith("/api/")) logError("server", res.locals.errMsg || `HTTP ${res.statusCode}`, { path: req.path, status: res.statusCode, clientId: req.body?.clientId || "" });
+  });
+  next();
+});
+
+/* ══════════════ GIỚI HẠN GỌI AI (chống tốn tín dụng Gemini) ══════════════ */
+const AI_PATHS = new Set(["/api/fengshui/analyze", "/api/construction/analyze", "/api/generate-specification-section", "/api/translate-specification-section", "/api/qna", "/api/extract-project-info", "/api/generate-concept-image"]);
+const aiHourMem = new Map<string, { h: string; n: number }>();
+const aiDayMem = new Map<string, { d: string; n: number }>();
+app.use(async (req: any, res: any, next: any) => {
+  if (req.method !== "POST" || !AI_PATHS.has(req.path) || isAdminRequest(req)) return next();
+  try {
+    const st: any = await getAppSettings();
+    const perHour = Number(st.aiLimitPerHour) || 0, perDay = Number(st.aiLimitPerDay) || 0;
+    if (!perHour && !perDay) return next();
+    const ip = sanitizeIp((req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").toString().split(",")[0].trim());
+    const now = new Date(), d = now.toISOString().slice(0, 10), h = now.toISOString().slice(0, 13);
+    const hk = aiHourMem.get(ip), hn = hk && hk.h === h ? hk.n : 0;
+    let dk = aiDayMem.get(ip), dn = dk && dk.d === d ? dk.n : -1;
+    const dayDoc = firestoreDb ? firestoreDb.collection("aiUsage").doc(`${d}_${ip}`) : null;
+    if (dn < 0) {
+      dn = 0;
+      if (dayDoc) { try { const snap: any = await withTimeout(dayDoc.get(), 3000); if (snap?.exists) dn = Number(snap.data()?.n) || 0; } catch { /* bộ nhớ */ } }
+    }
+    if ((perHour && hn >= perHour) || (perDay && dn >= perDay)) {
+      return res.status(429).json({ code: "AI_LIMIT", error: `Bạn đã dùng hết lượt phân tích AI ${perHour && hn >= perHour ? "trong giờ này" : "hôm nay"}. Vui lòng thử lại sau hoặc gọi hotline để được hỗ trợ.` });
+    }
+    aiHourMem.set(ip, { h, n: hn + 1 }); aiDayMem.set(ip, { d, n: dn + 1 });
+    if (dayDoc && fbAdmin) dayDoc.set({ n: fbAdmin.firestore.FieldValue.increment(1), d, ip }, { merge: true }).catch(() => {});
+  } catch { /* lỗi đếm không chặn khách */ }
+  next();
+});
+
 // Health Check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
@@ -721,78 +766,32 @@ async function recordSuccessfulAttempt(clientIp: string) {
 }
 
 const adminAuthMiddleware = async (req: any, res: any, next: any) => {
-  const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown")
-    .toString()
-    .split(",")[0]
-    .trim();
-
-  // 1. Persistent brute-force check via in-memory store
+  const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").toString().split(",")[0].trim();
   const limitStatus = await checkRateLimit(clientIp);
-  if (limitStatus.blocked) {
-    return res.status(429).json({
-      error: `Đã nhập sai quá nhiều lần, vui lòng thử lại sau ${limitStatus.remainingMinutes || 15} phút`
-    });
+  if (limitStatus.blocked) return res.status(429).json({ error: `Đã nhập sai quá nhiều lần, vui lòng thử lại sau ${limitStatus.remainingMinutes || 15} phút` });
+
+  const adminCode = (req.headers["x-admin-code"] || req.query?.code || req.body?.code || "").toString().trim().replace(/^["']|["']$/g, "").trim();
+  if (!getAdminCodes().length) {
+    await recordFailedAttempt(clientIp);
+    return res.status(401).json({ error: "Máy chủ chưa cấu hình ADMIN_CODE. Vào Vercel → Settings → Environment Variables để thêm mã admin." });
   }
-
-  const rawAdminCode = (req.headers["x-admin-code"] || req.query?.code || req.body?.code || "").toString().trim();
-  const adminCode = rawAdminCode.replace(/^["']|["']$/g, "").trim();
-
-  // Mật khẩu admin CHỈ lấy từ biến môi trường ADMIN_CODE trên Vercel (không còn mật khẩu viết cứng trong code)
-  const rawEnvCode = (
-    process.env.ADMIN_CODE || 
-    process.env.ADMIN_PASSWORD || 
-    process.env.admin_code || 
-    process.env.Admin_Code || 
-    ""
-  ).trim();
-
-  // Securely strip any accidental outer quotes pasted from copy-paste templates
-  const envAdminCode = rawEnvCode.replace(/^["']|["']$/g, "").trim();
-
-  if (!envAdminCode) {
+  let who = resolveAdmin(adminCode);
+  if (!who && adminCode) { await refreshStaff(true); who = resolveAdmin(adminCode); }
+  else refreshStaff().catch(() => {});
+  if (!who) {
     const failResult = await recordFailedAttempt(clientIp);
-    if (failResult.blocked) {
-      return res.status(429).json({ error: "Đã nhập sai quá 5 lần, vui lòng thử lại sau 15 phút" });
-    }
-    return res.status(401).json({ 
-      error: "Máy chủ chưa cấu hình ADMIN_CODE. Vào Vercel → Settings → Environment Variables để thêm mã admin."
-    });
+    if (failResult.blocked) return res.status(429).json({ error: "Đã nhập sai quá 5 lần, vui lòng thử lại sau 15 phút" });
+    return res.status(401).json({ error: "Mã bảo mật Admin không chính xác." });
   }
-
-  // Split and sanitize each individual code (stripping potential inner quotes)
-  const adminCodes = envAdminCode
-    .split(",")
-    .map(c => c.replace(/^["']|["']$/g, "").trim())
-    .filter(Boolean);
-
-  const envMatch = adminCode && adminCodes.includes(adminCode);
-
-  if (envMatch) {
-    recordSuccessfulAttempt(clientIp).catch(console.error);
-    return next();
-  } else {
-    const failResult = await recordFailedAttempt(clientIp);
-    if (failResult.blocked) {
-      return res.status(429).json({ error: "Đã nhập sai quá 5 lần, vui lòng thử lại sau 15 phút" });
-    }
-    
-    // Provide secure, masked debug details to guide the user in setting up variables properly
-    const envKeysFound = Object.keys(process.env).filter(k => 
-      ["ADMIN_CODE", "ADMIN_PASSWORD", "admin_code", "Admin_Code"].includes(k) && !!process.env[k]
-    );
-
-    return res.status(401).json({ 
-      error: "Mã bảo mật Admin không chính xác. Vui lòng kiểm tra cấu hình ADMIN_CODE trên Vercel.",
-      debugInfo: {
-        keysDetected: envKeysFound,
-        codesLoadedCount: adminCodes.length,
-
-        inputLength: adminCode.length,
-      }
-    });
+  recordSuccessfulAttempt(clientIp).catch(console.error);
+  const need = requiredRole(req.method, req.path);
+  if (!who.owner && (need === "owner" || !who.roles.includes(need))) {
+    return res.status(403).json({ error: `Tài khoản "${who.name}" chưa được cấp quyền: ${need === "owner" ? "chỉ chủ tài khoản" : ROLE_LABEL[need as AdminRole]}` });
   }
+  req.admin = who;
+  if (req.method !== "GET") res.on("finish", () => audit(who, req, res.statusCode));
+  next();
 };
-
 
 // ══════════════════════════════════════════════════════════════════
 // BẢO MẬT GÓI TRẢ PHÍ & GOOGLE SHEET
@@ -814,11 +813,62 @@ function getAdminCodes(): string[] {
     .trim().replace(/^["']|["']$/g, "").trim();
   return raw.split(",").map(c => c.replace(/^["']|["']$/g, "").trim()).filter(Boolean);
 }
+/* ══════════════ TÀI KHOẢN NHÂN VIÊN ADMIN ══════════════
+ * Chủ (mã ADMIN_CODE trên Vercel) có toàn quyền. Nhân viên có mã riêng (lưu dạng băm trong Firestore adminUsers) + quyền theo vai trò. */
+const ADMIN_ROLES = ["crm", "activate", "payout", "video", "samples", "settings"] as const;
+type AdminRole = typeof ADMIN_ROLES[number];
+const ROLE_LABEL: Record<AdminRole, string> = { crm: "Xem CRM khách", activate: "Kích hoạt gói / xác nhận thanh toán", payout: "CTV & hoa hồng", video: "Video", samples: "Mẫu thiết kế", settings: "Cài đặt vận hành" };
+const hashCode = (c: string) => crypto.createHash("sha256").update("yohu-staff:" + c).digest("hex");
+let staffCache: Map<string, any> = new Map();     // hash → nhân viên
+let staffLoadedAt = 0;
+async function refreshStaff(force = false) {
+  if (!firestoreDb) return;
+  if (!force && Date.now() - staffLoadedAt < 60_000) return;
+  try {
+    const snap: any = await withTimeout(firestoreDb.collection("adminUsers").get(), 5000);
+    const m = new Map<string, any>();
+    snap.docs.forEach((d: any) => { const u = { id: d.id, ...d.data() }; if (u.codeHash) m.set(u.codeHash, u); });
+    staffCache = m; staffLoadedAt = Date.now();
+  } catch (e: any) { console.warn("[staff] load:", e?.message || e); }
+}
+function resolveAdmin(code: string): { id: string; name: string; roles: string[]; owner: boolean } | null {
+  if (!code) return null;
+  const codes = getAdminCodes();
+  if (codes.length && codes.includes(code)) return { id: "owner", name: "Chủ tài khoản", roles: [...ADMIN_ROLES], owner: true };
+  const u = staffCache.get(hashCode(code));
+  if (u && u.active !== false) return { id: u.id, name: u.name || u.id, roles: Array.isArray(u.roles) ? u.roles : ["crm"], owner: false };
+  return null;
+}
 function isAdminRequest(req: any): boolean {
   const code = String(req.headers["x-admin-code"] || "").replace(/^["']|["']$/g, "").trim();
-  if (!code) return false;
-  const codes = getAdminCodes();
-  return codes.length > 0 && codes.includes(code);
+  return !!resolveAdmin(code);
+}
+/** Quyền cần cho từng đường dẫn admin (mặc định: xem CRM) */
+function requiredRole(method: string, path: string): AdminRole | "owner" {
+  if (path.startsWith("/api/admin/staff") || path.startsWith("/api/admin/audit")) return "owner";
+  if (path === "/api/admin/settings" && method !== "GET") return "settings";
+  if (path.startsWith("/api/admin/render-usage")) return "settings";
+  if (path.startsWith("/api/admin/activate-package") || path.startsWith("/api/admin/payment-requests") || /^\/api\/leads\/[^/]+\/goi/.test(path)) return "activate";
+  if (path.startsWith("/api/commissions") || path.startsWith("/api/ctv-partners") || path.startsWith("/api/tong-hop-ctv")) return "payout";
+  if (path.startsWith("/api/admin/design-samples")) return "samples";
+  if (path.startsWith("/api/admin/dispatch-video") || path.startsWith("/api/video-orders")) return "video";
+  return "crm";
+}
+const auditRing: any[] = [];
+function audit(who: any, req: any, status: number) {
+  const b = req.body || {};
+  const pick: any = {};
+  const SKIP = /image|code|secret|pin|data|prompt|html|base64/i;
+  Object.keys(b).slice(0, 25).forEach(k => {
+    const v = b[k];
+    if (SKIP.test(k) || v === undefined || v === null) return;
+    if (typeof v === "boolean" || typeof v === "number") pick[k] = v;
+    else if (typeof v === "string") pick[k] = v.slice(0, 80);
+    else if (Array.isArray(v) && v.every(x => typeof x === "string")) pick[k] = v.join(",").slice(0, 80);
+  });
+  const e = { who: who?.name || "?", whoId: who?.id || "?", method: req.method, path: req.path, data: pick, status, at: new Date().toISOString() };
+  auditRing.unshift(e); if (auditRing.length > 300) auditRing.length = 300;
+  if (firestoreDb) firestoreDb.collection("auditLogs").add(e).catch(() => {});
 }
 
 /** Gửi lệnh sang Google Apps Script, kèm mã bí mật GAS_SECRET */
@@ -911,6 +961,12 @@ app.post("/api/gas-proxy", express.text({ type: "*/*" }), async (req, res) => {
     if (!type) return res.status(400).json({ ok: false, error: "Thiếu type" });
 
     const admin = isAdminRequest(req);
+    if (GAS_ADMIN_TYPES.has(type) && admin) {
+      const who = resolveAdmin(String(req.headers["x-admin-code"] || "").trim());
+      const need: AdminRole = ["kich_hoat_goi", "update_goi", "giao_dich"].includes(type) ? "activate" : type === "update_commission_status" ? "payout" : type.includes("video") ? "video" : "crm";
+      if (who && !who.owner && !who.roles.includes(need)) return res.status(403).json({ ok: false, error: `Tài khoản "${who.name}" chưa có quyền: ${ROLE_LABEL[need]}` });
+      if (who && req.method !== "GET") audit(who, { ...req, path: "/api/gas-proxy:" + type, body: payloadObj }, 200);
+    }
     if (GAS_ADMIN_TYPES.has(type)) {
       if (!admin) {
         const ip = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").toString().split(",")[0].trim();
@@ -1073,7 +1129,7 @@ app.post("/api/admin/activate-package", adminAuthMiddleware, async (req, res) =>
 // Database Get Leads for CRM Dashboard
 app.get("/api/leads", adminAuthMiddleware, async (req, res) => {
   const leads = await getLeads();
-  res.json(leads);
+  res.json(leads.map(({ _secretHash, ...l }: any) => l));
 });
 
 // Objective 8: Get Tong_Hop_CTV summaries
@@ -1231,9 +1287,11 @@ const DEFAULT_APP_SETTINGS = {
   freePreview3D: false,        // khách chưa mua gói được xoay xem 3D (bản xem thử, không tải / quay / chốt)
   serverImageStorage: false,   // lưu ảnh phối cảnh lên Firebase Storage (có thể phát sinh phí khi dùng nhiều)
   ctvCommissionEnabled: false, // máy chủ tự ghi sổ hoa hồng CTV khi admin xác nhận đã thu tiền (chỉ ghi sổ, KHÔNG chuyển tiền)
-  renderLimitPerClient: 15     // số lượt AI vẽ ảnh phối cảnh tối đa / khách (bảo vệ tín dụng API)
+  renderLimitPerClient: 15,    // số lượt AI vẽ ảnh phối cảnh tối đa / khách (bảo vệ tín dụng API)
+  aiLimitPerHour: 40,          // số lần gọi AI tối đa / 1 máy (IP) / giờ — 0 = không giới hạn
+  aiLimitPerDay: 150           // số lần gọi AI tối đa / 1 máy (IP) / ngày
 };
-const NUMERIC_SETTINGS = new Set(["renderLimitPerClient"]);
+const NUMERIC_SETTINGS = new Set(["renderLimitPerClient", "aiLimitPerHour", "aiLimitPerDay"]);
 let appSettingsCache: typeof DEFAULT_APP_SETTINGS | null = null;
 async function getAppSettings() {
   if (appSettingsCache) return appSettingsCache;
@@ -1395,6 +1453,97 @@ async function recordCommission(o: { clientId: string; product: string; amount: 
   return { ok: true, commission: com };
 }
 
+/* ── Admin: tôi là ai, nhân viên, nhật ký thao tác, nhật ký lỗi ── */
+app.get("/api/admin/me", adminAuthMiddleware, (req: any, res) => res.json({ ok: true, ...req.admin, roleLabels: ROLE_LABEL }));
+app.get("/api/admin/staff", adminAuthMiddleware, async (_req, res) => {
+  await refreshStaff(true);
+  let list: any[] = [];
+  if (firestoreDb) { try { const snap: any = await withTimeout(firestoreDb.collection("adminUsers").get(), 5000); list = snap.docs.map((d: any) => { const { codeHash, ...u } = d.data(); return { id: d.id, ...u, hasCode: !!codeHash }; }); } catch { /* rỗng */ } }
+  res.json({ ok: true, staff: list, roles: ROLE_LABEL, firestore: !!firestoreDb });
+});
+app.post("/api/admin/staff", adminAuthMiddleware, async (req, res) => {
+  if (!firestoreDb) return res.status(500).json({ ok: false, error: "Cần Firestore (FIREBASE_SERVICE_ACCOUNT) để lưu tài khoản nhân viên" });
+  const b = req.body || {};
+  const id = String(b.id || "").trim() || "nv_" + crypto.randomBytes(4).toString("hex");
+  const data: any = { updatedAt: new Date().toISOString() };
+  if (b.name !== undefined) data.name = String(b.name).slice(0, 60);
+  if (Array.isArray(b.roles)) data.roles = b.roles.filter((r: any) => (ADMIN_ROLES as readonly string[]).includes(r));
+  if (b.active !== undefined) data.active = !!b.active;
+  let newCode = "";
+  if (b.resetCode || !b.id) {
+    newCode = "NV-" + crypto.randomBytes(5).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase();
+    data.codeHash = hashCode(newCode);
+  }
+  if (!b.id) { data.createdAt = data.updatedAt; if (!data.roles) data.roles = ["crm"]; if (data.active === undefined) data.active = true; }
+  await withTimeout(firestoreDb.collection("adminUsers").doc(id).set(data, { merge: true }), 5000);
+  await refreshStaff(true);
+  res.json({ ok: true, id, code: newCode || undefined, note: newCode ? "Mã chỉ hiện 1 lần — gửi riêng cho nhân viên." : "" });
+});
+app.get("/api/admin/audit", adminAuthMiddleware, async (_req, res) => {
+  let list = auditRing.slice(0, 200);
+  if (firestoreDb) { try { const snap: any = await withTimeout(firestoreDb.collection("auditLogs").orderBy("at", "desc").limit(200).get(), 5000); list = snap.docs.map((d: any) => d.data()); } catch { /* bộ nhớ */ } }
+  res.json({ ok: true, logs: list });
+});
+app.get("/api/admin/errors", adminAuthMiddleware, async (_req, res) => {
+  let list = errorRing.slice(0, 200);
+  if (firestoreDb) { try { const snap: any = await withTimeout(firestoreDb.collection("errorLogs").orderBy("at", "desc").limit(200).get(), 5000); list = snap.docs.map((d: any) => d.data()); } catch { /* bộ nhớ */ } }
+  res.json({ ok: true, errors: list });
+});
+// Trình duyệt khách báo lỗi (giới hạn 30 lần / giờ / máy)
+const clientErrMem = new Map<string, { h: string; n: number }>();
+app.post("/api/log-error", (req, res) => {
+  const ip = sanitizeIp((req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").toString().split(",")[0].trim());
+  const h = new Date().toISOString().slice(0, 13), cur = clientErrMem.get(ip);
+  const n = cur && cur.h === h ? cur.n : 0;
+  if (n >= 30) return res.json({ ok: false });
+  clientErrMem.set(ip, { h, n: n + 1 });
+  const b = req.body || {};
+  logError("client:" + String(b.source || "app").slice(0, 40), String(b.message || "").slice(0, 600), { clientId: String(b.clientId || "").slice(0, 60), url: String(b.url || "").slice(0, 200), ua: String(req.headers["user-agent"] || "").slice(0, 160), stack: String(b.stack || "").slice(0, 600) });
+  res.json({ ok: true });
+});
+
+/* ── Yêu cầu thanh toán (khách bấm "Tôi đã chuyển khoản") → admin bấm "Đã nhận tiền" để mở gói ── */
+const paymentMem = new Map<string, any>();
+app.post("/api/payment-requests", async (req, res) => {
+  const b = req.body || {};
+  const clientId = String(b.clientId || "").trim();
+  const goi = ["standard", "design"].includes(b.goi) ? b.goi : "";
+  if (!clientId || !goi) return res.status(400).json({ ok: false, error: "Thiếu mã khách hoặc gói" });
+  const id = `PAY-${clientId}-${goi}`;
+  const old = paymentMem.get(id) || (firestoreDb ? await withTimeout(firestoreDb.collection("paymentRequests").doc(id).get(), 4000).then((d: any) => d?.exists ? d.data() : null).catch(() => null) : null);
+  if (old && old.status === "confirmed") return res.json({ ok: true, id, status: "confirmed" });
+  const data = { id, clientId, goi, goiLabel: GOI_LABEL[goi as GoiKey], amount: Math.max(0, Math.round(Number(b.amount) || 0)), name: String(b.name || "").slice(0, 80), phone: String(b.phone || "").slice(0, 20), transferNote: String(b.transferNote || "").slice(0, 80), status: "pending", createdAt: old?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+  paymentMem.set(id, data);
+  if (firestoreDb) await withTimeout(firestoreDb.collection("paymentRequests").doc(id).set(data, { merge: true }), 5000).catch(() => {});
+  if (getGasUrl()) forwardToGas({ type: "giao_dich", ma_kh: clientId, goi_mua: data.goiLabel, so_tien: data.amount, trang_thai: "Khách báo đã chuyển khoản" }).catch(() => {});
+  res.json({ ok: true, id, status: "pending" });
+});
+app.get("/api/admin/payment-requests", adminAuthMiddleware, async (_req, res) => {
+  let list = Array.from(paymentMem.values());
+  if (firestoreDb) { try { const snap: any = await withTimeout(firestoreDb.collection("paymentRequests").get(), 5000); list = snap.docs.map((d: any) => d.data()); list.forEach(x => paymentMem.set(x.id, x)); } catch { /* bộ nhớ */ } }
+  res.json({ ok: true, requests: list.sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt))) });
+});
+app.post("/api/admin/payment-requests/:id", adminAuthMiddleware, async (req: any, res) => {
+  const id = String(req.params.id);
+  const cur = paymentMem.get(id) || (firestoreDb ? await withTimeout(firestoreDb.collection("paymentRequests").doc(id).get(), 4000).then((d: any) => d?.exists ? d.data() : null).catch(() => null) : null);
+  if (!cur) return res.status(404).json({ ok: false, error: "Không tìm thấy yêu cầu" });
+  const action = String(req.body?.action || "");
+  const next: any = { ...cur, updatedAt: new Date().toISOString(), handledBy: req.admin?.name || "" };
+  let commission: any = null;
+  if (action === "confirm") {
+    const amount = Math.max(0, Math.round(Number(req.body?.amount ?? cur.amount) || 0));
+    await setVerifiedPackage(cur.clientId, cur.goi, { so_tien: amount, via: "payment_request", by: req.admin?.name || "" });
+    if (amount > 0) { try { commission = await recordCommission({ clientId: cur.clientId, product: cur.goi, amount }); } catch { /* bỏ qua */ } }
+    if (getGasUrl()) forwardToGas({ type: "kich_hoat_goi", ma_kh: cur.clientId, goi_mua: GOI_LABEL[cur.goi as GoiKey], so_tien: amount }).catch(() => {});
+    Object.assign(next, { status: "confirmed", amount, confirmedAt: next.updatedAt });
+  } else if (action === "reject") {
+    Object.assign(next, { status: "rejected", reason: String(req.body?.reason || "").slice(0, 120) });
+  } else return res.status(400).json({ ok: false, error: "action phải là confirm hoặc reject" });
+  paymentMem.set(id, next);
+  if (firestoreDb) await withTimeout(firestoreDb.collection("paymentRequests").doc(id).set(next, { merge: true }), 5000).catch(() => {});
+  res.json({ ok: true, request: next, commission });
+});
+
 app.get("/api/config", async (req, res) => {
   // Không trả địa chỉ Apps Script thật cho trình duyệt — chỉ trả đường dẫn proxy nội bộ
   const st = await getAppSettings();
@@ -1407,7 +1556,13 @@ app.get("/api/config", async (req, res) => {
     freePreview3D: st.freePreview3D,
     serverImageStorage: st.serverImageStorage,
     ctvCommissionEnabled: st.ctvCommissionEnabled,
-    renderLimitPerClient: st.renderLimitPerClient
+    renderLimitPerClient: st.renderLimitPerClient,
+    company: {
+      name: (process.env.COMPANY_NAME || "").trim(), address: (process.env.COMPANY_ADDRESS || "").trim(),
+      email: (process.env.COMPANY_EMAIL || "").trim(), taxCode: (process.env.COMPANY_TAX_CODE || "").trim()
+    },
+    // QR chuyển khoản (VietQR): BANK_ID = mã ngân hàng (vd vietcombank, VCB hoặc số BIN 970436), BANK_ACCOUNT, BANK_ACCOUNT_NAME
+    bankQr: (process.env.BANK_ID && process.env.BANK_ACCOUNT) ? { bankId: process.env.BANK_ID.trim(), account: process.env.BANK_ACCOUNT.trim(), name: (process.env.BANK_ACCOUNT_NAME || "").trim() } : null
   });
 });
 
@@ -1444,23 +1599,34 @@ app.post("/api/leads", async (req, res) => {
     return res.status(400).json({ error: "Missing unique Client ID (id) for autosaving." });
   }
 
-  const leads = await getLeads();
-  const existingIndex = leads.findIndex((l) => l.id === clientData.id);
-
-  const updatedLead = {
-    ...clientData,
-    status: clientData.status || "new",
-    createdAt: clientData.createdAt || new Date().toISOString()
+  // Chỉ trình duyệt đã tạo hồ sơ (giữ mã bí mật x-client-secret) hoặc admin mới được ghi đè hồ sơ
+  const admin = isAdminRequest(req);
+  const secret = String(req.headers["x-client-secret"] || "").trim();
+  const existing: any = await getLeadById(String(clientData.id));
+  const { _secretHash: _ignore, ...incoming } = clientData;
+  void _ignore;
+  if (!admin && existing?._secretHash && (!secret || hashCode("client:" + secret) !== existing._secretHash)) {
+    return res.status(403).json({ error: "Hồ sơ này thuộc thiết bị khác — không được ghi đè." });
+  }
+  const updatedLead: any = {
+    ...(existing || {}),
+    ...incoming,
+    status: admin ? (incoming.status || existing?.status || "new") : (existing?.status || incoming.status || "new"),
+    createdAt: existing?.createdAt || incoming.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
+  if (!admin) { delete updatedLead.goi_mua; delete updatedLead.goiMua; if (existing?.goi_mua) updatedLead.goi_mua = existing.goi_mua; }
+  if (existing?._secretHash) updatedLead._secretHash = existing._secretHash;
+  else if (secret) updatedLead._secretHash = hashCode("client:" + secret);
 
   await saveLeadToFirestore(updatedLead);
-  
-  // Background fire-and-forget notification to Google Sheets web app
-  notifyGoogleSheets(updatedLead).catch((err) => {
+  const { _secretHash, ...publicLead } = updatedLead;
+  void _secretHash;
+  if (!req.body?.skipSheet) notifyGoogleSheets(publicLead).catch((err) => {
     console.error("Async Google Sheets notification task failed:", err);
   });
 
-  res.json({ success: true, lead: updatedLead });
+  res.json({ success: true, lead: publicLead });
 });
 
 // Update Caregiver Lead status from CRM admin dashboard (secured)
@@ -2866,6 +3032,9 @@ Nếu trường nào không tìm thấy thông tin, để trống ("") hoặc gi
 app.get("/api/client-documents/:clientId", async (req, res) => {
   try {
     const { clientId } = req.params;
+    if (firestoreDb) {
+      try { const snap: any = await withTimeout(firestoreDb.collection("clientDocuments").where("clientId", "==", clientId).get(), 5000); snap.docs.forEach((d: any) => inMemoryStore.clientDocuments.set(d.id, { id: d.id, ...d.data() })); } catch (e: any) { console.warn("[docs] read:", e?.message || e); }
+    }
     const docs = Array.from(inMemoryStore.clientDocuments.values())
       .filter(doc => doc.clientId === clientId);
     docs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
@@ -2889,6 +3058,7 @@ app.post("/api/client-documents", async (req, res) => {
       createdAt: new Date().toISOString()
     };
     inMemoryStore.clientDocuments.set(id, newDoc);
+    if (firestoreDb) { try { await withTimeout(firestoreDb.collection("clientDocuments").doc(id).set(newDoc), 5000); } catch (e: any) { console.warn("[docs] write:", e?.message || e); } }
     res.json({ success: true, id: id });
   } catch (err: any) {
     console.error("Error adding client document:", err);
