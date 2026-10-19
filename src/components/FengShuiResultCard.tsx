@@ -208,8 +208,18 @@ export const FengShuiResultCard: React.FC<FengShuiResultCardProps> = ({
       {Array.isArray((fengShuiAnalysis as any).borrowAgeDetails) && (fengShuiAnalysis as any).borrowAgeDetails.length > 0 && /phạm/.test(String((fengShuiAnalysis as any).advice2026 || '')) && !/không phạm/.test(String((fengShuiAnalysis as any).advice2026 || '').slice(0, 200)) && (
         <div className={`p-4 rounded-xl border text-xs sm:text-sm ${theme === 'dark' ? 'bg-slate-950/40 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-900'}`}>
           <b className="text-sm sm:text-base">🤝 Tuổi có thể mượn để động thổ</b>
-          <ul className="mt-1 space-y-1">{(fengShuiAnalysis as any).borrowAgeDetails.map((d: any, i: number) => <li key={i}>• <b>{d.year} {d.canChi}</b> — {d.why}</li>)}</ul>
-          <p className="mt-2 opacity-80">Vì sao loại tuổi khác: tuổi <b>xung</b> (đối nhau), <b>hình</b> (khắc chế) hoặc <b>hại</b> với năm khởi công đều kiêng đứng tên, dù không phạm Tam Tai / Kim Lâu / Hoang Ốc.</p>
+          {!(fengShuiAnalysis as any).borrowAgeDetails.some((d: any) => d.tier !== 'luu_y') && (
+            <p className="mt-1 p-2 rounded-lg bg-amber-500/15 text-amber-600 font-bold">⚠️ Năm này không có tuổi mượn hoàn hảo cho gia đình. Các tuổi dưới đây dùng được nhưng có lưu ý — cân nhắc lùi năm khởi công (xem lời khuyên ở trên) hoặc hỏi thầy địa phương.</p>
+          )}
+          <ul className="mt-2 space-y-2">{(fengShuiAnalysis as any).borrowAgeDetails.map((d: any, i: number) => (
+            <li key={i} className={`p-2 rounded-lg border ${d.tier === 'luu_y' ? 'border-amber-500/40' : 'border-emerald-500/40'}`}>
+              <div><b>{d.year} {d.canChi}</b>{d.age ? ` · tuổi mụ ${d.age}` : ''} <span className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-black ${d.tier === 'luu_y' ? 'bg-amber-500/20 text-amber-600' : 'bg-emerald-500/20 text-emerald-600'}`}>{d.tier === 'luu_y' ? 'Dùng được – có lưu ý' : 'Tốt'}</span></div>
+              {Array.isArray(d.relations) && d.relations.length ? (
+                <ul className="mt-1 text-[12px] sm:text-xs space-y-0.5">{d.relations.map((r: any, k: number) => <li key={k}>– Với {r.label}: <b>{r.text}</b></li>)}</ul>
+              ) : <div className="text-[12px]">{d.why}</div>}
+            </li>
+          ))}</ul>
+          <p className="mt-2 opacity-80">Cách tool lọc: <b>loại hẳn</b> tuổi phạm Tam Tai / Kim Lâu / Hoang Ốc, tuổi xung, hình, hại với năm khởi công, tuổi xung hoặc hình với gia chủ, vợ/chồng. <b>Có lưu ý</b>: chỉ bán xung (cùng nhóm tứ hành xung) hoặc lục hại với gia đình.</p>
         </div>
       )}
 
@@ -236,7 +246,7 @@ export const FengShuiResultCard: React.FC<FengShuiResultCardProps> = ({
               : 'bg-white border-slate-200 text-slate-900 shadow-xs'
           }`}
         >
-          {fengShuiAnalysis.deepAnalysis}
+          {(fengShuiAnalysis as any).deepAnalysisCore || fengShuiAnalysis.deepAnalysis}
         </div>
       )}
     </div>
