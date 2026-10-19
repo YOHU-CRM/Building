@@ -89,6 +89,8 @@ export function getUnifiedEstimate(input: PricingInput): FullProjectEstimateResu
     roofType: ct.loai_mai || ct.constructionType,
     widthM: site.lotWidthM,
     houseLengthM: site.houseLengthM,
+    floorHeight1: Number((ct as any).floorHeight1) || undefined,
+    floorHeightUpper: Number((ct as any).floorHeightUpper) || undefined,
     yeuCau: {
       mac_be_tong: ct.mac_be_tong, mac_thep: ct.mac_thep, loai_gach: ct.loai_gach, bien_phap_cop_pha: ct.bien_phap_cop_pha,
       ty_trong_eps: ct.ty_trong_eps, do_day_vach_eps: ct.do_day_vach_eps, loai_san: ct.loai_san, loai_vach: ct.loai_vach,

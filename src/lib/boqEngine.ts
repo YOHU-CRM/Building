@@ -821,6 +821,8 @@ export function calculateMasterProjectEstimate(params: {
   widthM?: number;            // chiều rộng nhà (để ước số cột/đài cọc)
   houseLengthM?: number;      // chiều sâu nhà
   yeuCau?: CustomerChoices;   // các lựa chọn vật tư / kỹ thuật gia chủ đã chọn
+  floorHeight1?: number;      // chiều cao tầng 1 (m) gia chủ nhập — mặc định 3,6
+  floorHeightUpper?: number;  // chiều cao các tầng trên (m) — mặc định 3,3
 }): FullProjectEstimateResult {
   const optionKey: StructuralOptionKey = params.optionKey || 'PA1';
   const packageKey: FinishingPackageKey = params.packageKey || 'tieu_chuan';
@@ -834,6 +836,10 @@ export function calculateMasterProjectEstimate(params: {
 
   const regionInfo = REGIONAL_FACTORS[regionKey];
   const regionFactor = regionInfo.factor;
+  const nTang = Math.max(1, Math.round(Number(params.so_tang) || 1));
+  const hIn = (v: any, d: number) => { const x = Number(v); return isFinite(x) && x >= 2.4 && x <= 6 ? x : d; };
+  const h1 = hIn(params.floorHeight1, 3.6), hu = hIn(params.floorHeightUpper, 3.3);
+  const heightFactor = Number((((h1 + (nTang - 1) * hu) / nTang) / ((3.6 + (nTang - 1) * 3.3) / nTang)).toFixed(3));
 
   const so_tang = Math.max(1, params.so_tang || 1);
   const dien_tich_xay_dung = Math.max(20, params.dien_tich_xay_dung || 186.0);
@@ -924,7 +930,7 @@ export function calculateMasterProjectEstimate(params: {
           : 'Mái bằng BTCT: chống thấm 2 lớp + lát gạch chống nóng, tôn che tum';
       }
 
-      const { quantity, formattedQuantity } = item.computeQuantity({
+      let { quantity, formattedQuantity } = item.computeQuantity({
         dien_tich_san,
         dien_tich_xay_dung,
         so_tang,
@@ -932,6 +938,12 @@ export function calculateMasterProjectEstimate(params: {
         so_phong_ngu,
         co_san_vuon
       });
+      // tường, sơn tường: khối lượng tỷ lệ với chiều cao tầng gia chủ nhập (hệ số chuẩn tính cho 3,6m / 3,3m)
+      if (heightFactor !== 1 && quantity > 0 && (item.category === 'wall' || item.id === 'HT_SON')) {
+        const q2 = Number((quantity * heightFactor).toFixed(1));
+        formattedQuantity = formattedQuantity.replace(String(quantity), String(q2));
+        quantity = q2;
+      }
 
       if (quantity <= 0) return;
       const ch = applyChoices(item, item.specs[pkg], quantity, formattedQuantity, params.yeuCau, params.loai_tran);

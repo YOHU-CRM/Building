@@ -38,6 +38,8 @@ export interface MassingModel {
 
 export interface MassingInput extends Omit<PlannerInput, 'floor'> {
   roofType?: string;          // "Tôn lạnh", "Mái ngói", "Mái bằng", "Mái Thái"...
+  floorHeight1?: number | string;      // chiều cao tầng 1 (m), mặc định 3,6
+  floorHeightUpper?: number | string;  // chiều cao tầng trên (m), mặc định 3,3
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -72,7 +74,8 @@ export function buildMassing(input: MassingInput): MassingModel {
   const floorBase: number[] = [0, PLINTH];
   const floorHeight: number[] = [0];
   for (let f = 1; f <= floors; f++) {
-    floorHeight[f] = f === 1 ? 3.6 : 3.3;
+    const hv = (v: any, d: number) => { const x = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(x) && x >= 2.4 && x <= 6 ? x : d; };
+    floorHeight[f] = f === 1 ? hv(input.floorHeight1, 3.6) : hv(input.floorHeightUpper, 3.3);
     floorBase[f + 1] = r2(floorBase[f] + floorHeight[f]);
   }
   const topY = floorBase[floors + 1];

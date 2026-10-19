@@ -77,9 +77,16 @@ export const exportSvgToPdf = async (
         }
         
         // Footer watermark & verification
-        pdf.setFontSize(8);
-        pdf.setTextColor(100, 116, 139);
-        pdf.text(`${footerText} - Bản vẽ ${i + 1}/${svgSources.length}`, margin, pdfHeight - 6);
+        // Chân trang: vẽ chữ thành ảnh (font của trình duyệt có đủ dấu tiếng Việt; font mặc định của jsPDF thì không)
+        try {
+          const fc = document.createElement('canvas');
+          fc.width = 2400; fc.height = 44;
+          const g = fc.getContext('2d')!;
+          g.fillStyle = '#ffffff'; g.fillRect(0, 0, fc.width, fc.height);
+          g.fillStyle = '#64748b'; g.font = '26px Arial, "Helvetica Neue", sans-serif'; g.textBaseline = 'middle';
+          g.fillText(`${footerText} - Bản vẽ ${i + 1}/${svgSources.length}`, 0, fc.height / 2, fc.width);
+          pdf.addImage(fc.toDataURL('image/png'), 'PNG', margin, pdfHeight - 9, availableWidth, availableWidth * fc.height / fc.width, undefined, 'FAST');
+        } catch { /* bỏ qua chân trang nếu lỗi */ }
         
         URL.revokeObjectURL(url);
         resolve();
