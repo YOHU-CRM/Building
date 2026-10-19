@@ -21,6 +21,7 @@ export interface FengShuiAnalysis {
   luckyColors?: string[]; // Alias hỗ trợ tương thích
   favorableGroundbreakingDates: string[]; // Ngày động thổ thích hợp
   deepAnalysis: string; // Phân tích chuyên sâu phong thủy thực tế sách cổ
+  deepAnalysisCore?: string; // bản hiển thị trên giao diện (không lặp các khung riêng)
   canChi?: string; // Ví dụ: Kỷ Mùi
   advice2026?: string; // Lời khuyên động thổ 2026
   luckyNumbers?: number[];
