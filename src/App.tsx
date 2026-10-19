@@ -43,8 +43,6 @@ import {
   ExternalLink
 } from "lucide-react";
 import { translations, getTranslation } from "./translations";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import { 
   UserInfo, 
   FengShuiAnalysis, 
@@ -57,27 +55,32 @@ import {
   UserInfoExtended
 } from "./types";
 import OnboardingPopup from "./components/OnboardingPopup";
-import CrmDashboard from "./components/CrmDashboard";
+const CrmDashboard = React.lazy(() => import("./components/CrmDashboard"));
 import ReportDashboard from "./components/ReportDashboard";
 import PricingTableSection from "./components/PricingTableSection";
-import DesignTemplateGallery from "./components/DesignTemplateGallery";
-import PerspectiveImageUploader from "./components/PerspectiveImageUploader";
-import FloorPlan2DViewer from "./components/FloorPlan2DViewer";
-import PerspectiveStudio, { PerspectiveOptions, RenderRequest, RenderResult, StudioShot, InteriorRoom } from "./components/PerspectiveStudio";
+const DesignTemplateGallery = React.lazy(() => import("./components/DesignTemplateGallery"));
+const PerspectiveImageUploader = React.lazy(() => import("./components/PerspectiveImageUploader"));
+const FloorPlan2DViewer = React.lazy(() => import("./components/FloorPlan2DViewer"));
+import type { PerspectiveOptions, RenderRequest, RenderResult, StudioShot, InteriorRoom } from "./components/PerspectiveStudio";
+const PerspectiveStudio = React.lazy(() => import("./components/PerspectiveStudio"));
 import type { MassingShot } from "./components/Massing3DViewer";
-import AdminSettingsPanel from "./components/AdminSettingsPanel";
-import CtvManager from "./components/CtvManager";
-import CtvPortal from "./components/CtvPortal";
+const AdminSettingsPanel = React.lazy(() => import("./components/AdminSettingsPanel"));
+const PaymentsPanel = React.lazy(() => import("./components/AdminOpsPanels").then(m => ({ default: m.PaymentsPanel })));
+const StaffPanel = React.lazy(() => import("./components/AdminOpsPanels").then(m => ({ default: m.StaffPanel })));
+const ErrorsPanel = React.lazy(() => import("./components/AdminOpsPanels").then(m => ({ default: m.ErrorsPanel })));
+const CtvManager = React.lazy(() => import("./components/CtvManager"));
+const CtvPortal = React.lazy(() => import("./components/CtvPortal"));
 import { listRoomSlots, specOf } from "./lib/roomSpecs";
+import { reportError, installErrorReporting, clientSecret } from "./lib/errorReport";
 import RoomRequirementsPanel from "./components/RoomRequirementsPanel";
-import AdminDesignManager from "./components/AdminDesignManager";
+const AdminDesignManager = React.lazy(() => import("./components/AdminDesignManager"));
 import CustomerResultsCard, { PerspectiveShot } from "./components/CustomerResultsCard";
 import { computeSiteFor, setbacksFor, roomsFor, planDimsFor } from "./lib/siteGeometry";
 // 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
 const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
-import ElevationViewer from "./components/ElevationViewer";
+const ElevationViewer = React.lazy(() => import("./components/ElevationViewer"));
 import { ProjectIntakeUploader } from "./components/ProjectIntakeUploader";
-import { SpecificationReportModal } from "./components/SpecificationReportModal";
+const SpecificationReportModal = React.lazy(() => import("./components/SpecificationReportModal").then(m => ({ default: m.SpecificationReportModal })));
 import { STRUCTURAL_OPTIONS } from "./data/structuralOptions";
 import { calculateFengShui, translateFengShuiAnalysis, getLunarBirthYear, getDefaultConstructionYear, getCanChi } from "./lib/fengshui";
 import { callGas, fetchVerifiedPackage, adminActivatePackage } from "./lib/gasClient";
@@ -97,7 +100,8 @@ import { StepAUserInfoForm } from "./components/StepAUserInfoForm";
 import { AppHeaderAndSteps } from "./components/AppHeaderAndSteps";
 import { AdminAuthModal } from "./components/AdminAuthModal";
 import { SavedProfilesModal } from "./components/SavedProfilesModal";
-import { VideoUpsellModal } from "./components/VideoUpsellModal";
+const VideoUpsellModal = React.lazy(() => import("./components/VideoUpsellModal").then(m => ({ default: m.VideoUpsellModal })));
+const LazyBox = ({ children }: { children: React.ReactNode }) => <React.Suspense fallback={<div className="p-6 text-center text-sm text-slate-400">Đang tải…</div>}>{children}</React.Suspense>;
 
 export default function App() {
   // Locale State (Default to Vietnamese)
@@ -187,7 +191,7 @@ export default function App() {
       { ma_ctv: "VIP01", loai_doi_tac: "B2B VIP", hh_thoa_thuan: 30 }
     ];
   });
-  const [activeAdminTab, setActiveAdminTab] = useState<'leads' | 'videos' | 'commissions' | 'ctv' | 'perspective' | 'samples' | 'settings'>('leads');
+  const [activeAdminTab, setActiveAdminTab] = useState<'leads' | 'videos' | 'commissions' | 'ctv' | 'perspective' | 'samples' | 'settings' | 'payments' | 'staff' | 'errors'>('leads');
   const [adminVideoStatusFilter, setAdminVideoStatusFilter] = useState<'ALL' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
   const [adminVideoSearch, setAdminVideoSearch] = useState<string>("");
   const [floorPlanSvgUrl, setFloorPlanSvgUrl] = useState<string | null>(null);
@@ -198,6 +202,8 @@ export default function App() {
 
   const [hotline, setHotline] = useState<string>("0973 480 488");
   const [bankInfo, setBankInfo] = useState<string>("");
+  const [bankQr, setBankQr] = useState<{ bankId: string; account: string; name: string } | null>(null);
+  const [companyInfo, setCompanyInfo] = useState<{ name: string; address: string; email: string; taxCode: string } | null>(null);
   useEffect(() => {
     fetch("/api/config")
       .then(r => r.json())
@@ -205,6 +211,8 @@ export default function App() {
         if (data.gasUrl) setDynamicGasUrl(data.gasUrl);
         if (data.hotline) setHotline(data.hotline);
         if (data.bankInfo) setBankInfo(data.bankInfo);
+        if (data.bankQr) setBankQr(data.bankQr);
+        if (data.company) setCompanyInfo(data.company);
         if (typeof data.videoOrderEnabled === 'boolean') setVideoOrderEnabled(data.videoOrderEnabled);
         if (typeof data.freePreview3D === 'boolean') setFreePreview3D(data.freePreview3D);
         if (typeof data.serverImageStorage === 'boolean') setServerImageStorage(data.serverImageStorage);
@@ -213,6 +221,7 @@ export default function App() {
       .catch(err => console.warn("Could not fetch dynamic GAS URL:", err));
   }, []);
 
+  useEffect(() => { installErrorReporting(); }, []);
   // Admin bật/tắt mục video với khách (cài đặt trên máy chủ)
   const [videoOrderEnabled, setVideoOrderEnabled] = useState<boolean>(true);
   // Các công tắc admin (mặc định TẮT, admin bật ở tab ⚙️ Cài đặt)
@@ -230,6 +239,14 @@ export default function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
     return sessionStorage.getItem("yohu_admin_logged_in") === "true";
   });
+  // Tài khoản admin đang đăng nhập (chủ hoặc nhân viên) + quyền
+  const [adminMe, setAdminMe] = useState<{ name: string; roles: string[]; owner: boolean } | null>(null);
+  useEffect(() => {
+    if (!isAdminAuthenticated) { setAdminMe(null); return; }
+    fetch("/api/admin/me", { headers: { "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" } })
+      .then(r => r.ok ? r.json() : null).then(d => d && setAdminMe({ name: d.name, roles: d.roles || [], owner: !!d.owner })).catch(() => {});
+  }, [isAdminAuthenticated]);
+  const canAdmin = (role: string) => !adminMe || adminMe.owner || adminMe.roles.includes(role);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>("");
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
@@ -1362,6 +1379,21 @@ export default function App() {
         };
         saveLeadLocal(leadLocal);
 
+        // Lưu hồ sơ lên máy chủ (Firestore) — để CTV, thanh toán, video, ảnh gắn đúng khách. Bỏ ảnh lớn cho nhẹ.
+        try {
+          const ci: any = { ...(activeConstructionInfo || {}) };
+          delete ci.referenceImages; delete ci.sketchImages; delete ci.uploadedImages;
+          if (ci.rooms?.sketchLayout?.anh) ci.rooms = { ...ci.rooms, sketchLayout: { ...ci.rooms.sketchLayout, anh: undefined } };
+          const fs: any = activeFengShui ? { element: activeFengShui.element, cungPhi: activeFengShui.cungPhi, canChi: activeFengShui.canChi, favorableDirections: activeFengShui.favorableDirections } : null;
+          const serverLead = { id: activeClientId, userInfo: activeUserInfo, constructionInfo: ci, fengShuiAnalysis: fs, affiliateData: activeAffiliateData, lang: activeLang, skipSheet: true };
+          const body = JSON.stringify(serverLead);
+          if (body.length < 700_000) fetch("/api/leads", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-client-secret": clientSecret(), ...(isAdminAuthenticated ? { "x-admin-code": sessionStorage.getItem("yohu_admin_code") || "" } : {}) },
+            body
+          }).then(r => { if (!r.ok && r.status !== 403) reportError("lead-save", `Lưu hồ sơ lên máy chủ lỗi ${r.status}`); }).catch(() => {});
+        } catch (e) { reportError("lead-save", e); }
+
         // Gửi thẳng GAS_URL qua GET + mode:no-cors (dùng biến payload đã build sẵn trong hàm)
         const params = new URLSearchParams({ data: JSON.stringify(payload) });
         callGas(params).catch(err => console.warn(err));
@@ -2039,7 +2071,7 @@ export default function App() {
     const skRooms = sk?.co_phac_thao !== false ? (sk?.tang || []).flatMap((t: any) => (t.phong || []).map((r: any) => `T${t.tang}: ${r.ten_goc || r.loai}`)) : [];
     return [
       `Loại công trình: ${ct.constructionType || 'Nhà ở'}`,
-      `Số tầng: ${ct.floors || 1}`,
+      `Số tầng: ${ct.floors || 1}; cao tầng 1: ${Number(ct.floorHeight1) || 3.6}m${(Number(ct.floors) || 1) > 1 ? `; tầng trên: ${Number(ct.floorHeightUpper) || 3.3}m` : ''}`,
       `Kích thước nhà xây: rộng ${site.lotWidthM}m (mặt tiền), sâu ${site.houseLengthM}m; diện tích xây dựng ${site.footprint}m²`,
       `Hướng mặt tiền: ${userInfo?.desiredDirection || 'chưa rõ'}`,
       `Mái: ${ct.loai_mai || 'theo loại công trình'}`,
@@ -2100,7 +2132,10 @@ export default function App() {
       body: JSON.stringify({ prompt: buildHouseBrief(), view: r.view, style: r.style, extra: r.extra, referenceImages: refs, massingImage: toPart(r.massingImage), styleImage: toPart(styleData), shotLabel: r.shotLabel, loai_phong: r.roomBrief || '', lang, clientId })
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.imageUrl) throw new Error(data.error || `Chưa tạo được ảnh (mã lỗi ${res.status}). Vui lòng thử lại sau.`);
+    if (!res.ok || !data.imageUrl) {
+      if (res.status >= 500 || res.status === 0) reportError("perspective", data.error || `HTTP ${res.status}`);
+      throw new Error(data.error || `Chưa tạo được ảnh (mã lỗi ${res.status}). Vui lòng thử lại sau.`);
+    }
     const small = await compressImage(data.imageUrl);
     return { url: await uploadPerspective(small, { label: r.shotLabel, style: r.style, view: r.view }), quota: data.quota };
   };
@@ -2201,7 +2236,8 @@ export default function App() {
       setLoadingMessage(t.pdf.generating);
       setAiLoading(true);
 
-      const totalPages = goi === 'free' ? 1 : goi === 'standard' ? 2 : 3;
+      const sumOff = goi === 'free' ? 0 : 1;      // trang tóm tắt cho gói trả phí
+      const totalPages = (goi === 'free' ? 1 : goi === 'standard' ? 2 : 3) + sumOff;
       const kh = data.userInfo || userInfo;
       const ct = data.constructionInfo || constructionInfo;
       const ai = data.aiResult || aiReport;
@@ -2287,13 +2323,24 @@ export default function App() {
         backSetbackM: setbacksFor(ct).back
       });
       const archSvgDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(archSvg)}`;
+      // Ảnh cho trang tóm tắt: chỉ dùng ảnh của chính hồ sơ đang mở, và chỉ ảnh nằm sẵn trong máy (data:) để PDF không lỗi
+      const sameClient = !data?.id || data.id === clientId;
+      const sumImgs: { src: string; cap: string; fit?: string }[] = [];
+      if (sameClient) {
+        const persp = perspectiveShots.find(p => String(p.url).startsWith('data:') && p.view !== 'interior');
+        if (persp) sumImgs.push({ src: persp.url, cap: `Phối cảnh ${persp.label || ''} · ${persp.style}` });
+        const m3d = massingShots.find(x => x.key === 'corner_l')?.url || massingSnapshot;
+        if (m3d && m3d.startsWith('data:')) sumImgs.push({ src: m3d, cap: '3D hình khối (dựng từ mặt bằng)' });
+        if (goi === 'design' && elevationSvgUrl) sumImgs.push({ src: elevationSvgUrl, cap: 'Mặt đứng chính', fit: 'contain' });
+      }
+      const sumDays: any[] = Array.isArray(fs.auspiciousDays) ? fs.auspiciousDays.slice(0, 3) : [];
 
       const html = `
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>YOHU BUILD AI Report</title>
+<title>YOHU CONSTECH Report</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 11px; color: #1e293b; background: #fff; line-height: 1.45; }
@@ -2345,6 +2392,49 @@ export default function App() {
 </head>
 <body>
 
+${sumOff ? `
+<!-- TRANG TÓM TẮT -->
+<div class="pdf-page">
+  <div>
+    <div class="header">
+      <div class="header-top">
+        <div>
+          <div class="brand">🏛️ YOHU CONSTECH · TÓM TẮT HỒ SƠ</div>
+          <div class="title">Hồ sơ nhà của ${ten}</div>
+        </div>
+        <div class="badge">${goiLabel}</div>
+      </div>
+      <div class="meta-bar">
+        <span>${ct.constructionType || 'Nhà ở'} · ${est.floors} tầng · ${est.areaPerFloor} m²/sàn · tổng sàn ~${est.totalFloorArea} m²</span>
+        <span>Ngày xuất <b>${ngay}</b></span>
+      </div>
+    </div>
+    ${sumImgs.length ? `<div class="section"><div style="display:grid; grid-template-columns:${sumImgs.length > 1 ? '1fr 1fr' : '1fr'}; gap:8px;">${sumImgs.map((im: any) => `<div style="border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#fff;"><img src="${im.src}" style="width:100%; height:${sumImgs.length > 2 ? 150 : 210}px; object-fit:${im.fit || 'cover'}; display:block; background:#fff;"/><div style="font-size:9px; padding:3px 8px; color:#475569;">${im.cap}</div></div>`).join('')}</div></div>` : ''}
+    <div class="section">
+      <div class="section-title">Hướng nhà & tuổi khởi công</div>
+      <div class="grid-2">
+        <div class="cell" style="background:${fs.directionVerdict?.isGood ? '#ecfdf5' : '#fef2f2'};"><div class="cell-label">Hướng ${desiredDirection || 'chưa chọn'}</div><div class="cell-value">${fs.directionVerdict?.summary || ''}</div></div>
+        <div class="cell"><div class="cell-label">Năm khởi công ${targetYearPdf} (${getCanChi(targetYearPdf)})</div><div class="cell-value" style="font-size:9.5px; font-weight:600;">${String(advice2026Text).split('. ').slice(0, 3).join('. ').slice(0, 420)}${String(advice2026Text).length > 420 ? '…' : ''}</div></div>
+      </div>
+      ${sumDays.length ? `<div class="card-blue" style="margin-top:6px;"><div style="font-weight:800; color:#0284c7;">📅 Ngày khởi công gợi ý</div>${sumDays.map((d: any) => `<div style="font-size:9.5px;">• ${d.weekday} ${d.solar} (${d.lunar}) — ngày ${d.dayCanChi}, ${d.than}. Giờ: ${(d.hours || []).join(', ')}</div>`).join('')}</div>` : ''}
+    </div>
+    <div class="section">
+      <div class="section-title">Dự toán 3 phương án kết cấu</div>
+      <table class="styled-table">
+        <tr><th>Phương án</th><th style="text-align:right;">Suất đầu tư /m²</th><th style="text-align:right;">Tổng trọn gói</th></tr>
+        ${(['pa1', 'pa2', 'pa3'] as const).map(k => { const o: any = (est.packageOptions as any)[k]; const sel = est.selectedOption && o.title === est.selectedOption.title; return `<tr><td style="font-weight:${sel ? 800 : 600};">${sel ? '★ ' : ''}${o.title}</td><td style="text-align:right;">${formatCurrency(o.pricePerSqm, lang)}</td><td style="text-align:right; font-weight:800;">${formatCurrency(o.totalCost, lang)}</td></tr>`; }).join('')}
+      </table>
+      <div style="font-size:9px; color:#64748b; margin-top:4px;">★ phương án gia chủ đang chọn. Dự toán sơ bộ theo đơn giá khu vực; chi tiết vật tư, nhân công ở các trang sau.</div>
+    </div>
+  </div>
+  <div class="footer">
+    <span>🏛️ YOHU CONSTECH · Tóm tắt hồ sơ</span>
+    <span>Hotline: <b>${hotline}</b></span>
+    <span>Trang <b>1/${totalPages}</b></span>
+  </div>
+</div>
+` : ''}
+
 <!-- TRANG 1: HỒ SƠ KHÁCH HÀNG & BÁO CÁO PHONG THỦY BÁT TRẠCH 2026 -->
 <div class="pdf-page">
   <div>
@@ -2352,7 +2442,7 @@ export default function App() {
     <div class="header">
       <div class="header-top">
         <div>
-          <div class="brand">🏛️ YOHU BUILD AI · HỆ THỐNG KIẾN TRÚC & PHONG THỦY CHUẨN XÁC</div>
+          <div class="brand">🏛️ YOHU CONSTECH · HỆ THỐNG KIẾN TRÚC & PHONG THỦY CHUẨN XÁC</div>
           <div class="title">Báo Cáo Phong Thủy & Thông Tin Công Trình</div>
         </div>
         <div class="badge">${goiLabel}</div>
@@ -2360,7 +2450,7 @@ export default function App() {
       <div class="meta-bar">
         <span>Gia chủ: <b>${ten}</b></span>
         <span>${t.pdf.labels.dateExport} <b>${ngay}</b></span>
-        <span>Hotline: <b>0973.480.488</b> · Zalo: <b>0339.606.969</b></span>
+        <span>Hotline: <b>${hotline}</b> · Zalo: <b>0339.606.969</b></span>
       </div>
     </div>
 
@@ -2374,7 +2464,7 @@ export default function App() {
         <div class="cell"><div class="cell-label">Hướng Đất Dự Định</div><div class="cell-value">${desiredDirection || 'Chưa chọn'}${fs.directionVerdict?.star ? ` · <b style="color:${fs.directionVerdict.isGood ? '#047857' : '#dc2626'}">${fs.directionVerdict.star} — ${fs.directionVerdict.isGood ? 'HỢP' : 'KHÔNG HỢP'}</b>` : ''}</div></div>
         <div class="cell"><div class="cell-label">Loại Công Trình</div><div class="cell-value">${ct.constructionType || 'Nhà phố / Nhà ở dân dụng'}</div></div>
         <div class="cell"><div class="cell-label">Diện Tích Xây Dựng</div><div class="cell-value">${est.areaPerFloor} m²/sàn · <b>Tổng sàn: ~${est.totalFloorArea} m²</b></div></div>
-        <div class="cell"><div class="cell-label">Quy Mô Số Tầng</div><div class="cell-value">${est.floors} Tầng (Chiều cao kỹ thuật tiêu chuẩn)</div></div>
+        <div class="cell"><div class="cell-label">Quy Mô Số Tầng</div><div class="cell-value">${est.floors} Tầng · cao tầng 1: ${Number(ct.floorHeight1) || 3.6}m${est.floors > 1 ? ` · tầng trên: ${Number(ct.floorHeightUpper) || 3.3}m` : ''}</div></div>
         <div class="cell"><div class="cell-label">Ngân Sách Dự Kiến</div><div class="cell-value">${ct.totalBudget ? formatCurrency(ct.totalBudget, lang) : 'Chưa nhập'}${ct.totalBudget && est.selectedOption ? ` · <b style="color:${Number(ct.totalBudget) >= est.selectedOption.totalCost ? '#047857' : '#dc2626'}">${Number(ct.totalBudget) >= est.selectedOption.totalCost ? 'ĐỦ' : 'THIẾU ~' + formatCurrency(est.selectedOption.totalCost - Number(ct.totalBudget), lang)} so với dự toán</b>` : ''}</div></div>
       </div>
     </div>
@@ -2437,13 +2527,13 @@ export default function App() {
 
   <!-- Footer Page 1 -->
   <div class="footer">
-    <span>🏛️ YOHU BUILD AI · Phần mềm phân tích Thiết kế & Dự toán Kiến trúc</span>
-    <span>Hotline hỗ trợ kỹ sư: <b>0973.480.488</b> · www.379aipro.online</span>
-    <span>Trang <b>1/${totalPages}</b></span>
+    <span>🏛️ YOHU CONSTECH · Phần mềm phân tích Thiết kế & Dự toán Kiến trúc</span>
+    <span>Hotline hỗ trợ kỹ sư: <b>${hotline}</b> · www.379aipro.online</span>
+    <span>Trang <b>${1 + sumOff}/${totalPages}</b></span>
   </div>
 </div>
 
-${totalPages >= 2 ? `
+${goi !== 'free' ? `
 <!-- TRANG 2: DỰ TOÁN KINH PHÍ, BOQ VẬT TƯ & KẾT CẤU KỸ THUẬT -->
 <div class="pdf-page">
   <div>
@@ -2451,7 +2541,7 @@ ${totalPages >= 2 ? `
     <div class="header">
       <div class="header-top">
         <div>
-          <div class="brand">💰 YOHU BUILD AI · DỰ TOÁN KINH PHÍ & KẾT CẤU CÔNG TRÌNH</div>
+          <div class="brand">💰 YOHU CONSTECH · DỰ TOÁN KINH PHÍ & KẾT CẤU CÔNG TRÌNH</div>
           <div class="title">Bảng Bóc Tách Dự Toán & Giải Pháp Thi Công</div>
         </div>
         <div class="badge">Dự toán 2026</div>
@@ -2459,7 +2549,7 @@ ${totalPages >= 2 ? `
       <div class="meta-bar">
         <span>Công trình: <b>${ct.constructionType || 'Nhà dân dụng'} ${est.floors} Tầng</b></span>
         <span>Diện tích sàn: <b>~${est.totalFloorArea} m²</b></span>
-        <span>Hotline Kỹ sư: <b>0973.480.488</b></span>
+        <span>Hotline Kỹ sư: <b>${hotline}</b></span>
       </div>
     </div>
 
@@ -2560,7 +2650,7 @@ ${totalPages >= 2 ? `
         <div>
           <div style="font-size: 10.5px; font-weight: 800; color: #fde047;">🎬 NÂNG CẤP VIDEO 3D CINEMATIC TOÀN CẢNH CĂN NHÀ</div>
           <div style="font-size: 9px; color: #e2e8f0; margin-top: 2px;">
-            Trải nghiệm không gian sống chân thực trước khi xây · Chỉ từ 200.000đ · Hotline: <b>0973.480.488</b> · Zalo: <b>0339.606.969</b>
+            Trải nghiệm không gian sống chân thực trước khi xây · Chỉ từ 200.000đ · Hotline: <b>${hotline}</b> · Zalo: <b>0339.606.969</b>
           </div>
         </div>
         <div class="btn-gold">Hotline Kỹ Sư</div>
@@ -2570,14 +2660,14 @@ ${totalPages >= 2 ? `
 
   <!-- Footer Page 2 -->
   <div class="footer">
-    <span>🏛️ YOHU BUILD AI · Báo Cáo Kỹ Thuật Đã Được Kiểm Tra Quy Chuẩn</span>
-    <span>Tư vấn trực tiếp: <b>0973.480.488</b> · Website: www.379aipro.online</span>
-    <span>Trang <b>2/${totalPages}</b></span>
+    <span>🏛️ YOHU CONSTECH · Báo Cáo Kỹ Thuật Đã Được Kiểm Tra Quy Chuẩn</span>
+    <span>Tư vấn trực tiếp: <b>${hotline}</b> · Website: www.379aipro.online</span>
+    <span>Trang <b>${2 + sumOff}/${totalPages}</b></span>
   </div>
 </div>
 ` : ''}
 
-${totalPages >= 3 ? `
+${goi === 'design' ? `
 <!-- TRANG 3: SƠ ĐỒ MẶT BẰNG BỐ TRÍ CÔNG NĂNG & TIÊU CHUẨN HOÀN THIỆN CAO CẤP -->
 <div class="pdf-page">
   <div>
@@ -2585,7 +2675,7 @@ ${totalPages >= 3 ? `
     <div class="header">
       <div class="header-top">
         <div>
-          <div class="brand">📐 YOHU BUILD AI · BẢN VẼ MẶT BẰNG & QUY HOẠCH CÔNG NĂNG</div>
+          <div class="brand">📐 YOHU CONSTECH · BẢN VẼ MẶT BẰNG & QUY HOẠCH CÔNG NĂNG</div>
           <div class="title">Sơ Đồ Phân Khu Kiến Trúc & Chứng Nhận Thẩm Định Kỹ Thuật</div>
         </div>
         <div class="badge" style="background:#7c3aed; color:#fff;">${lang === 'vi' ? 'Gói Thiết Kế 1.5M' : `Design Tier (${formatCurrency(1500000, lang)})`}</div>
@@ -2742,14 +2832,14 @@ ${totalPages >= 3 ? `
       <div class="card" style="display:flex; justify-content:space-between; align-items:center; background:#fafafa; border:2px dashed #cbd5e1; padding:12px 18px;">
         <div style="flex:1;">
           <div style="font-weight:800; font-size:11px; color:#0f172a; text-transform:uppercase;">
-            🏛️ HỘI ĐỒNG THẨM ĐỊNH KỸ THUẬT & KIẾN TRÚC YOHU BUILD AI
+            🏛️ HỘI ĐỒNG THẨM ĐỊNH KỸ THUẬT & KIẾN TRÚC YOHU CONSTECH
           </div>
           <div style="font-size:9px; color:#64748b; margin-top:3px; line-height:1.45;">
             Hồ sơ thiết kế và bảng bóc tách khối lượng đã được rà soát đối chiếu theo bộ Tiêu chuẩn Xây dựng Việt Nam (TCVN hiện hành).<br/>
             Khách hàng được hỗ trợ kỹ sư khảo sát thực địa và giám sát thi công theo hợp đồng trọn gói.
           </div>
           <div style="font-size:8.5px; color:#0f172a; margin-top:6px; font-weight:600;">
-            Kỹ sư phụ trách: <b>KS. Nguyễn Văn Tuấn</b> · Hotline tiếp nhận: <b>0973.480.488</b> · Email: <b>yohu.vn@gmail.com</b>
+            Kỹ sư phụ trách: <b>KS. Nguyễn Văn Tuấn</b> · Hotline tiếp nhận: <b>${hotline}</b> · Email: <b>yohu.vn@gmail.com</b>
           </div>
         </div>
         <div style="margin-left:20px; text-align:center;">
@@ -2765,9 +2855,9 @@ ${totalPages >= 3 ? `
 
   <!-- Footer Page 3 -->
   <div class="footer">
-    <span>🏛️ YOHU BUILD AI · Hồ Sơ Thiết Kế Kiến Trúc & Dự Toán Trọn Gói</span>
-    <span>Tư vấn kỹ sư trực tiếp: <b>0973.480.488</b> · Website: www.379aipro.online</span>
-    <span>Trang <b>3/${totalPages}</b></span>
+    <span>🏛️ YOHU CONSTECH · Hồ Sơ Thiết Kế Kiến Trúc & Dự Toán Trọn Gói</span>
+    <span>Tư vấn kỹ sư trực tiếp: <b>${hotline}</b> · Website: www.379aipro.online</span>
+    <span>Trang <b>${3 + sumOff}/${totalPages}</b></span>
   </div>
 </div>
 ` : ''}
@@ -2782,6 +2872,7 @@ ${totalPages >= 3 ? `
       container.innerHTML = html;
       document.body.appendChild(container);
 
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pages = container.querySelectorAll('.pdf-page');
 
@@ -2969,6 +3060,7 @@ ${totalPages >= 3 ? `
               <button onClick={() => setActiveAdminTab('leads')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'leads' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 {lang === 'vi' ? 'CRM Leads' : lang === 'lo' ? 'ລາຍຊື່ລູກຄ້າ CRM' : lang === 'zh' ? '客户档案 CRM' : 'CRM Leads'}
               </button>
+              {canAdmin('activate') && <button onClick={() => setActiveAdminTab('payments')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'payments' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>💳 Thanh toán</button>}
               <button onClick={() => setActiveAdminTab('videos')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'videos' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 {lang === 'vi' ? 'Đơn Video' : lang === 'lo' ? 'ລາຍການວິດີໂອ' : lang === 'zh' ? '视频订单' : 'Video Orders'}
               </button>
@@ -2981,12 +3073,19 @@ ${totalPages >= 3 ? `
               <button onClick={() => setActiveAdminTab('samples')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'samples' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 🖼️ Mẫu thiết kế
               </button>
+              <button onClick={() => setActiveAdminTab('errors')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'errors' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>🧯 Lỗi gần đây</button>
+              {adminMe?.owner && <button onClick={() => setActiveAdminTab('staff')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'staff' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>👥 Nhân viên</button>}
               <button onClick={() => setActiveAdminTab('settings')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeAdminTab === 'settings' ? 'text-amber-500 border-amber-500' : 'text-slate-400 border-transparent hover:text-slate-200'}`}>
                 ⚙️ Cài đặt
               </button>
             </div>
+            <LazyBox>
             {activeAdminTab === 'samples' && <AdminDesignManager />}
             {activeAdminTab === 'settings' && <AdminSettingsPanel />}
+            {activeAdminTab === 'payments' && <PaymentsPanel />}
+            {activeAdminTab === 'staff' && <StaffPanel />}
+            {activeAdminTab === 'errors' && <ErrorsPanel />}
+            {adminMe && !adminMe.owner && <div className="mb-3 text-xs text-slate-400">Đăng nhập: <b className="text-slate-200">{adminMe.name}</b> · quyền: {adminMe.roles.join(', ')}. Mục không có quyền sẽ báo "chưa được cấp quyền".</div>}
 
             {activeAdminTab === 'leads' && (
               <CrmDashboard 
@@ -3262,6 +3361,7 @@ ${totalPages >= 3 ? `
                 onUpdatePerspective={handleUpdatePerspective} 
               />
             )}
+            </LazyBox>
           </div>
           </>
         ) : (
@@ -3342,6 +3442,9 @@ ${totalPages >= 3 ? `
                     fengshuiCalculating={fengshuiCalculating}
                     fengShuiAnalysis={fengShuiAnalysis}
                     onProceedStepB={() => handleStepChange("B")}
+                    company={companyInfo}
+                    hotline={hotline}
+                    lang={lang}
                   />
                 )}
 
@@ -3716,6 +3819,18 @@ ${totalPages >= 3 ? `
                               ))}
                             </div>
                           </div>
+                          {/* Chiều cao tầng — dùng cho 3D, mặt đứng và khối lượng tường, sơn */}
+                          <div className="mt-2.5 flex items-center gap-2 flex-wrap text-xs">
+                            <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>{lang === 'vi' ? 'Chiều cao tầng 1' : lang === 'zh' ? '一层层高' : lang === 'lo' ? 'ຄວາມສູງຊັ້ນ 1' : 'Ground floor height'}</span>
+                            <input type="number" step="0.1" min={2.4} max={6} placeholder="3.6" value={(constructionInfo as any).floorHeight1 ?? ''}
+                              onChange={e => setConstructionInfo({ ...constructionInfo, floorHeight1: e.target.value } as any)}
+                              className={`w-16 p-1.5 rounded-lg border text-sm ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-300'}`} />
+                            <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>m · {lang === 'vi' ? 'tầng trên' : lang === 'zh' ? '上层' : lang === 'lo' ? 'ຊັ້ນເທິງ' : 'upper floors'}</span>
+                            <input type="number" step="0.1" min={2.4} max={6} placeholder="3.3" value={(constructionInfo as any).floorHeightUpper ?? ''}
+                              onChange={e => setConstructionInfo({ ...constructionInfo, floorHeightUpper: e.target.value } as any)}
+                              className={`w-16 p-1.5 rounded-lg border text-sm ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-300'}`} />
+                            <span className={theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}>m {lang === 'vi' ? '(để trống = 3,6 / 3,3m)' : '(blank = 3.6 / 3.3 m)'}</span>
+                          </div>
                         </div>
                         {/* Budget numbers box */}
                         <div className="p-4 sm:p-4.5 flex flex-col justify-between font-sans">
@@ -3900,7 +4015,7 @@ ${totalPages >= 3 ? `
                       </div>
 
                       {/* YÊU CẦU TỪNG PHÒNG: kích thước, tầng, vị trí, hướng (không bắt buộc) */}
-                      <RoomRequirementsPanel theme={theme} constructionInfo={constructionInfo} setConstructionInfo={setConstructionInfo as any} />
+                      <RoomRequirementsPanel theme={theme} constructionInfo={constructionInfo} setConstructionInfo={setConstructionInfo as any} lang={lang} />
 
                       {/* DESIGN REFERENCE IMAGES CONTAINER (ẢNH THAM CHIẾU DUPLICATING SCREENS) */}
                       <div>
@@ -4091,6 +4206,7 @@ ${totalPages >= 3 ? `
                                 shots={perspectiveShots}
                                 videoUrl={activeCustomerLead?.link_video_phoi_canh || serverVideoUrl || ""}
                                 localVideo={localVideo}
+                                lang={lang}
                                 onOpen3D={() => { setActiveDrawingTab('massing'); scrollToId('yohu-drawings'); }}
                                 onOpenPlan={() => { setActiveDrawingTab('floorplan'); scrollToId('yohu-drawings'); }}
                                 onOpenStudio={() => scrollToId('yohu-perspective')}
@@ -4110,7 +4226,7 @@ ${totalPages >= 3 ? `
                               link_anh_phoi_canh={activeCustomerLinkAnh}
                               onRedeemCode={handleApplyActivationCode}
                               perspectiveSlot={
-                                <PerspectiveStudio
+                                <LazyBox><PerspectiveStudio
                                   theme={theme}
                                   referenceImages={constructionInfo.referenceImages || []}
                                   massingShots={massingShots}
@@ -4125,7 +4241,8 @@ ${totalPages >= 3 ? `
                                   onOpenMassing={() => { setActiveDrawingTab('massing'); setTimeout(() => document.getElementById('yohu-drawings')?.scrollIntoView({ behavior: 'smooth' }), 100); }}
                                   setZoomImage={setZoomImage}
                                   packageTier={goiKichHoat}
-                                />
+                                  lang={lang}
+                                /></LazyBox>
                               }
                             />
 
@@ -4178,7 +4295,7 @@ ${totalPages >= 3 ? `
                                     desiredDirection={userInfo?.desiredDirection}
                                     frontSetbackM={setbacksFor(constructionInfo).front}
                                     backSetbackM={setbacksFor(constructionInfo).back}
-                                    roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
+                                    roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} floorHeight1={(constructionInfo as any).floorHeight1} floorHeightUpper={(constructionInfo as any).floorHeightUpper}
                                     onSnapshot={(url) => setMassingSnapshot(url)}
                                     onLockMassing={handleLockMassing}
                                     lockedAt={massingLockedAt}
@@ -4186,7 +4303,7 @@ ${totalPages >= 3 ? `
                                   />
                                 </React.Suspense>
                               ) : activeDrawingTab === 'floorplan' ? (
-                                <FloorPlan2DViewer 
+                                <LazyBox><FloorPlan2DViewer 
                                   dimensions={planDimsFor(constructionInfo)}
                                   floors={parseInt(constructionInfo.floors) || 2}
                                   constructionType={constructionInfo.constructionType}
@@ -4200,9 +4317,9 @@ ${totalPages >= 3 ? `
                                   frontSetbackM={setbacksFor(constructionInfo).front}
                                   backSetbackM={setbacksFor(constructionInfo).back}
                                   onToggleAdvice={(apply) => setConstructionInfo((prev: any) => ({ ...prev, rooms: { ...(prev.rooms || {}), applyAdvice: apply } }))}
-                                />
+                                /></LazyBox>
                               ) : (
-                                <ElevationViewer 
+                                <LazyBox><ElevationViewer 
                                   dimensions={planDimsFor(constructionInfo)}
                                   floors={parseInt(constructionInfo.floors) || 2}
                                   constructionType={constructionInfo.constructionType}
@@ -4211,12 +4328,12 @@ ${totalPages >= 3 ? `
                                   desiredDirection={userInfo?.desiredDirection}
                                   frontSetbackM={setbacksFor(constructionInfo).front}
                                   backSetbackM={setbacksFor(constructionInfo).back}
-                                  roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType}
+                                  roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} floorHeight1={(constructionInfo as any).floorHeight1} floorHeightUpper={(constructionInfo as any).floorHeightUpper}
                                   theme={theme}
                                   lang={lang}
                                   customerName={userInfo?.name || "Khách Hàng"}
                                   onExportSvgDataUrl={(url) => setElevationSvgUrl(url)}
-                                />
+                                /></LazyBox>
                               )}
                             </div>
                           ) : (
@@ -4605,6 +4722,7 @@ ${totalPages >= 3 ? `
 
                 {/* SECTION D: DESIGN TEMPLATE GALLERY & 3D HOUSE MODEL & YOUTUBE */}
                 {currentStep === "C" && (
+                  <LazyBox>
                   <DesignTemplateGallery 
                     theme={theme}
                     lang={lang}
@@ -4618,7 +4736,7 @@ ${totalPages >= 3 ? `
                           <Massing3DViewer dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
                             customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
                             frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
-                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} onSnapshot={(url) => setMassingSnapshot(url)}
+                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} floorHeight1={(constructionInfo as any).floorHeight1} floorHeightUpper={(constructionInfo as any).floorHeightUpper} onSnapshot={(url) => setMassingSnapshot(url)}
                             onLockMassing={handleLockMassing} lockedAt={massingLockedAt} onVideoReady={(url, ext) => setLocalVideo({ url, ext })} />
                         </React.Suspense>
                       </div>
@@ -4629,7 +4747,7 @@ ${totalPages >= 3 ? `
                           <Massing3DViewer preview dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
                             customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
                             frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
-                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} />
+                            roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} floorHeight1={(constructionInfo as any).floorHeight1} floorHeightUpper={(constructionInfo as any).floorHeightUpper} />
                         </React.Suspense>
                         <button onClick={() => requestPackage('design')} className="mt-3 px-4 py-2.5 rounded-xl bg-purple-600 text-white text-xs font-black cursor-pointer">Mở gói Thiết kế — chốt hình khối, ảnh phối cảnh, video, bản vẽ</button>
                       </div>
@@ -4641,6 +4759,7 @@ ${totalPages >= 3 ? `
                       </div>
                     )}
                   />
+                  </LazyBox>
                 )}
 
               </div>
@@ -4787,7 +4906,7 @@ ${totalPages >= 3 ? `
         </div>
       )}
 
-      {showCtvPortal && <CtvPortal onClose={() => setShowCtvPortal(false)} />}
+      {showCtvPortal && <LazyBox><CtvPortal onClose={() => setShowCtvPortal(false)} /></LazyBox>}
       {/* CTV DASHBOARD MODAL */}
       {showCTVDashboard && (
         <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4 animate-fade-in-up overflow-y-auto">
@@ -4859,6 +4978,7 @@ ${totalPages >= 3 ? `
       )}
 
       {/* --- BỔ SUNG: MODAL CHỌN GÓI VIDEO --- */}
+      {showVideoModal && <React.Suspense fallback={null}>
       <VideoUpsellModal
         isOpen={showVideoModal}
         onClose={() => setShowVideoModal(false)}
@@ -4882,6 +5002,7 @@ ${totalPages >= 3 ? `
           ]
         }}
       />
+      </React.Suspense>}
 
       {/* AI UPDATE NOTIFICATION POPUP MODAL */}
       {aiUpdateStatus && (
@@ -4939,6 +5060,15 @@ ${totalPages >= 3 ? `
           customerPhone={userInfo?.phone || ""}
           hotline={hotline}
           bankInfo={bankInfo}
+          bankQr={bankQr}
+          amount={(() => {
+            if ((pendingPackage || 'standard') === 'standard') return 299000;
+            try {
+              const [w, l] = String(planDimsFor(constructionInfo) || '').split(/[x×*]/).map(v => parseFloat(v));
+              const v = tinhGiaGoiThietKe((w || 0) * (l || 0), constructionInfo.constructionType || 'Bê tông cốt thép truyền thống', parseInt(constructionInfo.floors || '1') || 1);
+              return Number(v) > 0 ? Number(v) : 1500000;
+            } catch { return 1500000; }
+          })()}
           onClose={() => { setPendingPackage(null); setShowActivationModal(false); }}
           onCheckAgain={async () => {
             const want = pendingPackage || 'standard';
@@ -4954,6 +5084,7 @@ ${totalPages >= 3 ? `
         />
       )}
 
+      {showSpecificationModal && <React.Suspense fallback={null}>
       <SpecificationReportModal
         isOpen={showSpecificationModal}
         onClose={() => setShowSpecificationModal(false)}
@@ -4985,6 +5116,7 @@ ${totalPages >= 3 ? `
         clientId={clientId}
         onConsumeCredit={() => consumeAiCredit("Tạo thuyết minh 10 mục AI")}
       />
+      </React.Suspense>}
 
     </div>
   );
