@@ -1560,6 +1560,7 @@ Yêu cầu (ngôn ngữ ${lang}):
 5b. Kết luận hướng nhà ĐÃ TÍNH SẴN, giữ nguyên: ${baseInfo.directionVerdict?.summary || ""}. Chỉ được diễn giải thêm cách bố trí kiến trúc, không đảo kết luận.
 5. Phân tích sự tương tác giữa hướng nhà và cung mệnh.
 6. Văn phong: Tri thức, uy tín, kết hợp hài hòa phong thủy và kiến trúc hiện đại. KHÔNG dùng markdown.
+7. KHÔNG tự đề xuất tuổi mượn, tháng, ngày, giờ khởi công khác với kết quả đã tính sẵn ở mục 4; không khẳng định tuổi nào "hợp" nếu kết quả đã tính không ghi như vậy.
 
 JSON Format:
 {
@@ -2559,6 +2560,7 @@ function generateLocalFengShui(name: string, year: number, gender: string, direc
     luckyColors: calc.favorableColors,
     favorableGroundbreakingDates: calc.favorableDates2026,
     deepAnalysis: lang === 'vi' ? `Gia chủ ${name}. ` + calc.deepAnalysis : `Client ${name}, born ${calc.canChi} (${year}). ${calc.directionVerdict.summary}`,
+    deepAnalysisCore: lang === 'vi' ? `Gia chủ ${name}. ` + calc.deepAnalysisCore : undefined,
     advice2026: calc.advice2026,
     luckyNumbers: calc.luckyNumbers,
     targetYear: calc.targetYear,
