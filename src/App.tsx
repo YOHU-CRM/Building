@@ -513,7 +513,7 @@ export default function App() {
         bathroomCount: 2,
         dryingYard: true,
         parkingType: 'garage',
-        garden: true,
+        garden: false,
         fishPond: false,
         swimmingPool: false,
         entertainmentRoom: false,
