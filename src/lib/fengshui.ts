@@ -597,10 +597,11 @@ function chiRelation(dayChi: number, personChi: number): { bad: string; good: st
   return { bad: '', good: '', caution: '' };
 }
 
-/** Chọn ngày giờ khởi công: ngày Hoàng đạo trong các tháng âm cát, tránh Tam Nương, Nguyệt Kỵ.
- *  NGƯỜI ĐỨNG TÊN (gia chủ hoặc người mượn tuổi): loại ngày xung, hình, tự hình, hại và ngày cùng nhóm tứ hành xung.
- *  GIA ĐÌNH Ở THẬT (gia chủ, vợ/chồng — khi mượn tuổi): loại ngày xung, hình, hại, và ngày cùng nhóm tứ hành xung với gia chủ (cách chọn thận trọng).
- *  Giờ Hoàng đạo ban ngày, tránh giờ xung tuổi người đứng tên, gia chủ và giờ sinh. */
+/** Chọn ngày giờ khởi công — CHUẨN THỐNG NHẤT với chọn tuổi & chọn tháng:
+ *  Ngày: Hoàng đạo, không Tam Nương / Nguyệt Kỵ / Sát Chủ / Thọ Tử, không trực Kiến / Phá / Nguy / Thu / Bế.
+ *  NGƯỜI ĐỨNG TÊN: loại ngày xung, hình, tự hình, hại; cùng nhóm tứ hành xung = kỵ rất nhẹ → giữ, xếp sau, ghi chú.
+ *  GIA CHỦ / VỢ-CHỒNG (khi không đứng tên): chỉ loại ngày xung thẳng; kỵ nhẹ → giữ, ghi "nên tránh mặt lúc động thổ".
+ *  Giờ Hoàng đạo ban ngày, tránh giờ xung tuổi người đứng tên, gia đình và giờ sinh. */
 export function findAuspiciousDays(opts: { lunarYear: number; months: number[]; ownerYear: number; familyYears?: { year: number; label: string }[]; birthHour?: string; from?: Date; perMonth?: number; total?: number }): AuspiciousDay[] {
   const ownerChi = chiOf(opts.ownerYear);
   const fam = (opts.familyYears || []).filter(f => f.year && f.year !== opts.ownerYear).map(f => ({ ...f, chi: chiOf(f.year) }));
@@ -612,19 +613,20 @@ export function findAuspiciousDays(opts: { lunarYear: number; months: number[]; 
   const tet = jdFromDate(1, 1, opts.lunarYear);
   const standLabel = `${getCanChi(opts.ownerYear)} ${opts.ownerYear}`;
   for (let jd = tet - 40; jd < tet + 420; jd++) {
-    if (jd < jdFrom) continue;
+    if (jd <= jdFrom) continue;                                                             // chỉ ngày từ mai trở đi
     const sd = jdToDate(jd);
     const lu = solarToLunar(sd.d, sd.m, sd.y);
     if (lu.year !== opts.lunarYear || lu.leap || !opts.months.includes(lu.month)) continue;
     if (TAM_NUONG.includes(lu.day) || NGUYET_KY.includes(lu.day)) continue;
+    if (lu.month === 1 && lu.day <= 6) continue;                                          // nghỉ Tết
     const dayChi = (jd + 1) % 12, dayCan = (jd + 9) % 10;
     if (SAT_CHU[lu.month - 1] === dayChi || THO_TU[lu.month - 1] === dayChi) continue;     // ngày Sát Chủ, Thọ Tử
     const trucIdx = (dayChi - tietMonthChi(jd) + 12) % 12;
     if (TRUC_XAU.has(trucIdx)) continue;                                                   // trực Kiến, Phá, Nguy, Thu, Bế
     const rs = chiRelation(dayChi, ownerChi);
-    if (rs.bad || rs.caution) continue;      // thận trọng: loại cả ngày cùng nhóm tứ hành xung (bán xung)
+    if (rs.bad) continue;                                                                  // xung, hình, hại người đứng tên
     const rf = fam.map(f => ({ f, r: chiRelation(dayChi, f.chi) }));
-    if (rf.some(x => x.r.bad || x.r.caution)) continue;
+    if (rf.some(x => isXungChi(dayChi, x.f.chi))) continue;                                // xung thẳng gia chủ / vợ-chồng
     const monthChi = (lu.month + 1) % 12;
     const t = thanOf(monthChi, dayChi);
     if (!HOANG_DAO.has(t)) continue;
@@ -635,10 +637,11 @@ export function findAuspiciousDays(opts: { lunarYear: number; months: number[]; 
       if (hours.length >= 3) break;
     }
     if (!hours.length) continue;
-    const score = (rs.good ? 3 : 0) + (TRUC_TOT.has(trucIdx) ? 2 : 0) + rf.filter(x => x.r.good).length + (t === 0 || t === 4 ? 1 : 0);
+    const score = (rs.good ? 3 : 0) - (rs.caution ? 2 : 0) + (TRUC_TOT.has(trucIdx) ? 2 : 0) + rf.filter(x => x.r.good).length - rf.filter(x => x.r.bad || x.r.caution).length + (t === 0 || t === 4 ? 1 : 0);
     const dd = (n: number) => String(n).padStart(2, '0');
-    const parts = [`với người đứng tên ${standLabel}: ${rs.good || 'không xung, hình, hại'}`];
-    rf.forEach(x => parts.push(`với ${x.f.label} ${getCanChi(x.f.year)} ${x.f.year}: ${x.r.good || 'không xung, hình, hại'}`));
+    const word = (r: { bad: string; good: string; caution: string }) => r.good ? 'hợp' : r.bad ? 'kỵ nhẹ — nên tránh mặt lúc động thổ' : r.caution ? 'kỵ rất nhẹ' : 'không kỵ';
+    const parts = [`người đứng tên ${standLabel}: ${word(rs)}`];
+    rf.forEach(x => parts.push(`${x.f.label} ${x.f.year}: ${word(x.r)}`));
     out.push({
       month: lu.month, score,
       solar: `${dd(sd.d)}/${dd(sd.m)}/${sd.y}`, weekday: WEEKDAY[(jd + 1) % 7],
@@ -822,47 +825,72 @@ export function calculateFengShui(
     }
   }
 
-  // 7. Tháng cát lành (tham khảo — tiết khí đầu tháng âm lịch)
-  const elementMonths: Record<string, string[]> = {
-    Kim:  ["Tháng 2 âm lịch (Tiết Kinh Trập)", "Tháng 4 âm lịch (Tiết Lập Hạ)", "Tháng 8 âm lịch (Tiết Bạch Lộ - Kim vượng)", "Tháng 11 âm lịch (Tiết Đại Tuyết/Đông Chí)"],
-    Mộc:  ["Tháng 1 âm lịch (Tiết Lập Xuân - Mộc vượng)", "Tháng 2 âm lịch (Tiết Kinh Trập)", "Tháng 10 âm lịch (Tiết Lập Đông - Thủy sinh Mộc)", "Tháng 11 âm lịch (Tiết Đại Tuyết)"],
-    Thủy: ["Tháng 7 âm lịch (Tiết Lập Thu - Kim sinh Thủy)", "Tháng 10 âm lịch (Tiết Lập Đông - Thủy vượng)", "Tháng 11 âm lịch (Tiết Đại Tuyết)", "Tháng 12 âm lịch (Tiết Tiểu Hàn)"],
-    Hỏa:  ["Tháng 3 âm lịch (Tiết Thanh Minh - Mộc sinh Hỏa)", "Tháng 4 âm lịch (Tiết Lập Hạ - Hỏa vượng)", "Tháng 5 âm lịch (Tiết Mang Chủng)", "Tháng 6 âm lịch (Tiết Tiểu Thử)"],
-    Thổ:  ["Tháng 3 âm lịch (Tiết Thanh Minh)", "Tháng 6 âm lịch (Tiết Tiểu Thử - Hỏa sinh Thổ)", "Tháng 9 âm lịch (Tiết Hàn Lộ)", "Tháng 12 âm lịch (Tiết Tiểu Hàn)"]
+  // 7. THÁNG & NGÀY GIỜ KHỞI CÔNG — cùng chuẩn với chọn tuổi
+  // Người đứng tên: gia chủ (không phạm hạn) → tuổi mượn tốt nhất → vợ/chồng → tuổi hợp năm
+  const spouseM = familyYears.find(f => f.label !== 'gia chủ');
+  const standCands: number[] = [];
+  if (!listPhamPre(year, tYear)) standCands.push(year);
+  borrowAgeDetails.forEach(d => standCands.push(d.year));
+  if (spouseM) { const k = checkBuildYear(spouseM.year, tYear); if (k.clean && !k.isTruc && !standCands.length) standCands.push(spouseM.year); }
+  if (!standCands.length) findBorrowAgeDetails(tYear, 2, []).forEach(d => standCands.push(d.year));
+  if (!standCands.length) standCands.push(year);
+  const standName = (y: number) => y === year ? `gia chủ ${canChi} ${year}` : spouseM && y === spouseM.year ? `${spouseM.label} ${getCanChi(y)} ${y}` : `người mượn tuổi ${getCanChi(y)} ${y}`;
+  // Tháng còn lại trong năm khởi công (không gợi ý tháng đã qua)
+  const nowL = (() => { const n = new Date(); const vn = new Date(n.getTime() + (TZ * 60 + n.getTimezoneOffset()) * 60000); return solarToLunar(vn.getDate(), vn.getMonth() + 1, vn.getFullYear()); })();
+  const firstMonth = nowL.year > tYear ? 13 : nowL.year === tYear ? nowL.month : 1;
+  const ELEM_MONTH: Record<string, number[]> = { Kim: [7, 8, 3, 6, 9, 12], Mộc: [1, 2, 10, 11], Thủy: [10, 11, 7, 8], Hỏa: [4, 5, 1, 2], Thổ: [3, 6, 9, 12, 4, 5] };
+  const elemSet = new Set(ELEM_MONTH[napAm.hanh] || []);
+  const avoidMonthChi = c.isTruc ? chiIndex : -1;     // năm tuổi của gia chủ: tránh tháng trùng tuổi
+  const monthInfo = (m: number, sy: number) => {
+    const mc = (m + 1) % 12;
+    const rS = chiRelation(mc, chiOf(sy));
+    const reasons: string[] = []; const notes: string[] = []; let score = 0;
+    if (mc === avoidMonthChi) reasons.push(`trùng tuổi gia chủ trong năm tuổi`);
+    if (rS.bad) reasons.push(`kỵ ${standName(sy)}`);
+    else if (rS.good) { notes.push(`hợp ${standName(sy)}`); score += 3; }
+    else if (rS.caution) { notes.push(`kỵ rất nhẹ với ${standName(sy)}`); score -= 1; }
+    familyYears.filter(f => f.year !== sy).forEach(f => {
+      const r = chiRelation(mc, chiOf(f.year));
+      if (isXungChi(mc, chiOf(f.year))) reasons.push(`xung ${f.label} ${f.year}`);
+      else if (r.good) { notes.push(`hợp ${f.label}`); score += 1; }
+      else if (r.bad) { notes.push(`kỵ nhẹ ${f.label}`); score -= 1; }
+    });
+    if (m === 7) { notes.push('dân gian kiêng tháng 7 âm (tháng cô hồn) — chỉ dùng nếu gia đình không kiêng'); score -= 4; }
+    if (elemSet.has(m)) score += 1;
+    return { m, mc, ok: reasons.length === 0, reasons, notes, score };
   };
-  let monthList = [...(elementMonths[napAm.hanh] || elementMonths.Kim)];
-  if (chiIndex % 3 === 1) monthList[1] = "Tháng 3 âm lịch (Tiết Thanh Minh)";
-  else if (chiIndex % 3 === 2) monthList[2] = "Tháng 9 âm lịch (Tiết Hàn Lộ)";
-  // gộp theo số tháng (tránh "Tháng 3" xuất hiện 2 lần)
-  const byMonth = new Map<number, string>();
-  monthList.forEach(m => { const n = parseInt((m.match(/Tháng (\d+)/) || [])[1], 10); if (!byMonth.has(n) || m.length > byMonth.get(n)!.length) byMonth.set(n, m); });
-  // Người đứng tên động thổ: gia chủ (nếu không phạm hạn) hoặc người mượn tuổi phù hợp nhất
-  const standYear = listPhamPre(year, tYear) ? (borrowAgeDetails[0]?.year || year) : year;
-  const allYears = [standYear, ...familyYears.map(f => f.year)];
-  const avoidMonthChi = c.isTruc ? chiIndex : -1;     // năm tuổi của gia chủ: tránh thêm tháng trùng tuổi
-  // Tháng: theo ngũ hành bản mệnh, rồi loại tháng xung, hình, hại, bán xung với người đứng tên và gia đình
-  const elemMonths = [...byMonth.keys()].sort((a, b) => a - b);
-  const removedMonths = elemMonths.filter(m => !monthOkFor(m, allYears, avoidMonthChi));
-  let months = elemMonths.filter(m => monthOkFor(m, allYears, avoidMonthChi));
-  const MONTH_NAME = (m: number) => byMonth.get(m) || `Tháng ${m} âm lịch (tháng ${CHI[(m + 1) % 12]})`;
-  if (!months.length) months = Array.from({ length: 12 }, (_, i) => i + 1).filter(m => monthOkFor(m, allYears, avoidMonthChi));
-  let favorableDates = months.map(n => `${MONTH_NAME(n)} năm ${tCanChi} ${tYear}`);
-  if (removedMonths.length) favorableDates.push(`(Đã bỏ ${removedMonths.map(m => `tháng ${m} âm (tháng ${CHI[(m + 1) % 12]})`).join(', ')} vì xung, hình, hại hoặc bán xung với tuổi người đứng tên / gia đình${avoidMonthChi >= 0 && removedMonths.some(m => (m + 1) % 12 === avoidMonthChi) ? `, hoặc là tháng ${CHI[avoidMonthChi]} trùng tuổi gia chủ trong năm tuổi` : ''}${!elemMonths.some(m => months.includes(m)) ? '; các tháng trên là tháng thay thế hợp tuổi' : ''}.)`);
-  let auspiciousDays = findAuspiciousDays({ lunarYear: tYear, months, ownerYear: standYear, familyYears, birthHour, perMonth: Math.max(2, Math.ceil(6 / Math.max(1, months.length))), total: 6 });
-  if (!auspiciousDays.length) {
-    // các tháng trên không còn ngày đạt → xét mọi tháng khác trong năm hợp tuổi
-    const others = Array.from({ length: 12 }, (_, i) => i + 1).filter(m => !months.includes(m) && monthOkFor(m, allYears, avoidMonthChi));
-    auspiciousDays = findAuspiciousDays({ lunarYear: tYear, months: others, ownerYear: standYear, familyYears, birthHour, perMonth: 2, total: 6 });
-    if (auspiciousDays.length) favorableDates.push(`(Các tháng trên không còn ngày đạt đủ điều kiện; tool tìm thêm trong ${others.map(m => 'tháng ' + m).join(', ')} âm lịch.)`);
+  const monthRange = (m: number) => { // khoảng ngày dương của tháng âm m
+    const t0 = jdFromDate(1, 1, tYear); let a = 0, b = 0;
+    for (let jd = t0 - 40; jd < t0 + 420; jd++) { const sd = jdToDate(jd); const lu = solarToLunar(sd.d, sd.m, sd.y); if (lu.year === tYear && lu.month === m && !lu.leap) { if (!a) a = jd; b = jd; } }
+    const f = (jd: number) => { const d = jdToDate(jd); return `${String(d.d).padStart(2, '0')}/${String(d.m).padStart(2, '0')}`; };
+    return a ? `${f(a)}–${f(b)}/${jdToDate(b).y}` : '';
+  };
+  const remain = Array.from({ length: 12 }, (_, i) => i + 1).filter(m => m >= firstMonth);
+  let favorableDates: string[] = [];
+  let auspiciousDays: AuspiciousDay[] = [];
+  let standYear = standCands[0];
+  let usedMonths: ReturnType<typeof monthInfo>[] = [];
+  for (const sy of standCands.slice(0, 4)) {
+    const infos = remain.map(m => monthInfo(m, sy));
+    const okM = infos.filter(x => x.ok).sort((x, y) => y.score - x.score);
+    const days = findAuspiciousDays({ lunarYear: tYear, months: okM.map(x => x.m), ownerYear: sy, familyYears, birthHour, perMonth: 2, total: 6 });
+    if (days.length || sy === standCands[Math.min(3, standCands.length - 1)]) { standYear = sy; usedMonths = infos; auspiciousDays = days; break; }
   }
-  const standInfo = borrowAgeDetails.find(d => d.year === standYear);
+  const passed = firstMonth > 1 ? (firstMonth > 12 ? `Năm ${tYear} đã qua.` : `Tháng 1–${firstMonth - 1} âm năm ${tYear} đã qua, tool chỉ xét từ tháng ${firstMonth} âm trở đi.`) : '';
+  const goodM = usedMonths.filter(x => x.ok).sort((x, y) => y.score - x.score);
+  const badM = usedMonths.filter(x => !x.ok);
+  favorableDates.push(`Người đứng tên động thổ: ${standName(standYear)}.${standYear !== standCands[0] ? ` (Tuổi ${getCanChi(standCands[0])} ${standCands[0]} không còn ngày đẹp trong các tháng còn lại, tool chuyển sang tuổi này.)` : ''}`);
+  if (passed) favorableDates.push(passed);
+  [...goodM].sort((x, y) => x.m - y.m).forEach(x => favorableDates.push(`✅ Tháng ${x.m} âm (tháng ${CHI[x.mc]}${monthRange(x.m) ? ', dương lịch ' + monthRange(x.m) : ''})${x.notes.length ? ' — ' + x.notes.join(', ') : ''}`));
+  if (badM.length) favorableDates.push(`Không dùng: ${badM.map(x => `tháng ${x.m} âm (${x.reasons.join(', ')})`).join('; ')}.`);
+  const nextGoodForDays = nextGoodBuildYear(year, tYear, familyYears);
   if (auspiciousDays.length) {
-    favorableDates.push(`→ Ngày giờ khởi công đề xuất (theo tuổi ${standYear === year ? 'gia chủ ' + canChi : 'người mượn tuổi ' + getCanChi(standYear) + ' ' + standYear + (standInfo?.tier === 'luu_y' ? ' — tuổi mượn có lưu ý: ' + standInfo.warnings.join(', ') : '')}):`);
-    auspiciousDays.forEach(d => favorableDates.push(`📅 ${d.weekday} ${d.solar} (${d.lunar}) — ngày ${d.dayCanChi}, ${d.than}, ${d.note}. Giờ tốt: ${d.hours.join(', ')}.`));
+    favorableDates.push(`→ Ngày giờ khởi công đề xuất (theo tuổi ${standName(standYear)}):`);
+    auspiciousDays.forEach(d => favorableDates.push(`📅 ${d.weekday} ${d.solar} (${d.lunar}) — ngày ${d.dayCanChi}, ${d.than}. ${d.note}. Giờ tốt: ${d.hours.join(', ')}.`));
   } else {
-    favorableDates.push(`→ Năm ${tYear} không có ngày nào đạt đủ điều kiện cho người đứng tên và cả gia đình (ngày Hoàng đạo, trực tốt, không Tam Nương / Nguyệt Kỵ / Sát Chủ / Thọ Tử, không xung, hình, hại, bán xung tuổi). Nên chọn phương án lùi năm khởi công ở trên, hoặc nhờ thầy phong thủy chọn ngày trực tiếp.`);
+    favorableDates.push(`→ ${firstMonth > 12 || !goodM.length ? `Năm ${tYear} không còn tháng phù hợp` : `Các tháng còn lại của năm ${tYear} không còn ngày đạt đủ điều kiện`}. ${nextGoodForDays ? `Ngày gần nhất nên chọn trong năm ${nextGoodForDays.year} ${nextGoodForDays.canChi} (${nextGoodForDays.how}) — chọn năm khởi công ${nextGoodForDays.year} ở Bước A để tool tính ngày cụ thể.` : 'Nên nhờ thầy phong thủy chọn ngày trực tiếp.'}`);
   }
-  favorableDates.push("ℹ️ Ngày giờ trên do tool tính theo lịch Hoàng đạo phổ thông: đã tránh Tam Nương, Nguyệt Kỵ, Sát Chủ, Thọ Tử, trực Kiến / Phá / Nguy / Thu / Bế (ưu tiên trực Mãn, Định, Thành, Khai); ngày xung, hình, hại và cùng nhóm tứ hành xung với tuổi người đứng tên; khi mượn tuổi còn xét cả tuổi gia chủ (và vợ/chồng) theo cùng quy tắc; giờ xung tuổi và giờ sinh. Trước khi khởi công, gia chủ nên nhờ thầy phong thủy tại địa phương xem lại (nhị thập bát tú, sao tốt xấu theo bảng của thầy) để chốt ngày giờ chính xác.");
+  favorableDates.push("ℹ️ Cách tool chọn: ngày Hoàng đạo; tránh Tam Nương, Nguyệt Kỵ, Sát Chủ, Thọ Tử và trực Kiến / Phá / Nguy / Thu / Bế. Ngày, tháng xung, hình, hại tuổi người đứng tên bị loại; ngày, tháng xung thẳng tuổi gia chủ hoặc vợ/chồng bị loại; kỵ nhẹ thì vẫn dùng được và có ghi chú. Giờ tránh giờ xung tuổi và giờ sinh. Trước khi khởi công nên nhờ thầy địa phương xem lại để chốt.");
   // Tháng mưa bão: lưu ý thi công móng
   const rainNote = `Lưu ý thi công: tránh đào móng, đổ bê tông trong cao điểm mưa bão của địa phương (miền Bắc: tháng 7–9 dương; miền Trung: tháng 9–11 dương; miền Nam: tháng 6–10 dương).`;
 
