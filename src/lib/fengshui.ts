@@ -454,18 +454,21 @@ const isLucHop = (a: number, b: number) => LUC_HOP.some(([x, y]) => (a === x && 
 
 export interface BorrowAge {
   year: number; canChi: string; age: number;
-  tier: 'tot' | 'luu_y';               // tot = sạch hoàn toàn; luu_y = dùng được nhưng có điểm cần lưu ý
-  relations: { label: string; text: string }[];   // quan hệ với năm khởi công, gia chủ, vợ/chồng
-  warnings: string[];
+  tier: 'tot' | 'luu_y';               // tot = Nên mượn (hợp năm, hợp gia chủ & vợ/chồng); luu_y = Mượn được (kỵ nhẹ với gia chủ hoặc vợ/chồng — có cách xử lý)
+  relations: { label: string; text: string }[];   // quan hệ với năm khởi công, gia chủ, vợ/chồng (thuật ngữ — dùng cho PDF)
+  warnings: string[];                  // điểm kỵ nhẹ với gia đình
   why: string;
+  plain?: string;                      // 1 câu dễ hiểu cho khách
+  remedy?: string;                     // cách xử lý khi "Mượn được"
+  note?: string;                       // ghi chú nhỏ (vd. kỵ rất nhẹ với năm)
 }
 export interface FamilyMember { year: number; label: string }
 
-/** Gợi ý năm sinh nam giới (tuổi mụ 30–70) mượn tuổi động thổ — xét với NĂM khởi công và với GIA ĐÌNH (gia chủ, vợ/chồng).
- *  LOẠI HẲN: phạm Tam Tai / Kim Lâu / Hoang Ốc; xung, hình, tự hình, hại với năm; trùng năm tuổi (trực Thái Tuế);
- *            xung, hình, tự hình với gia chủ hoặc vợ/chồng.
- *  DÙNG ĐƯỢC – CÓ LƯU Ý: chỉ bán xung (cùng nhóm tứ hành xung) với năm / gia đình, hoặc hại với gia đình.
- *  TỐT: sạch hoàn toàn; ưu tiên tuổi tam hợp, lục hợp với năm và gia đình. */
+/** Gợi ý năm sinh nam giới (tuổi mụ 30–70) mượn tuổi động thổ — trọng tâm là GIA CHỦ, kèm xét VỢ/CHỒNG.
+ *  LOẠI HẲN: phạm Tam Tai / Kim Lâu / Hoang Ốc; xung, hình, tự hình, hại với năm; trùng năm tuổi;
+ *            xung thẳng hoặc tương hình (không kèm hợp) với gia chủ hoặc vợ/chồng.
+ *  NÊN MƯỢN: không vướng gì với gia chủ và vợ/chồng (cùng nhóm tứ hành xung với NĂM chỉ ghi chú — mức rất nhẹ).
+ *  MƯỢN ĐƯỢC: kỵ nhẹ với gia chủ hoặc vợ/chồng (cùng nhóm tứ hành xung, lục hại, Tỵ–Thân "vừa hợp vừa hình") → người đó tránh mặt lúc động thổ. */
 export function findBorrowAgeDetails(targetYear: number, limit = 6, family: FamilyMember[] = []): BorrowAge[] {
   const tChi = chiOf(targetYear);
   const out: (BorrowAge & { score: number })[] = [];
@@ -476,25 +479,47 @@ export function findBorrowAgeDetails(targetYear: number, limit = 6, family: Fami
     const bc = chiOf(y);
     if (!c.clean || c.isTruc || isHinhChi(bc, tChi) || isTuHinh(bc, tChi) || isHaiChi(bc, tChi)) continue;
     const fam = family.filter(f => f.year && f.year !== y);
-    if (fam.some(f => { const fc = chiOf(f.year); return isXungChi(bc, fc) || isHinhChi(bc, fc) || isTuHinh(bc, fc); })) continue;
+    const hopMaHinh = (a: number, b: number) => isHinhChi(a, b) && isLucHop(a, b);     // Tỵ–Thân
+    if (fam.some(f => { const fc = chiOf(f.year); return isXungChi(bc, fc) || isTuHinh(bc, fc) || (isHinhChi(bc, fc) && !hopMaHinh(bc, fc)); })) continue;
     const relations: { label: string; text: string }[] = [];
     const warnings: string[] = [];
+    const plainParts: string[] = [];
+    const avoid: string[] = [];
+    let note = '';
     let score = age >= 40 && age <= 60 ? 3 : 0;
-    const rel = (otherChi: number, label: string, isYear: boolean) => {
-      const pair = `${CHI[bc]}–${CHI[otherChi]}`;
-      if (isTamHop(bc, otherChi)) { relations.push({ label, text: `tam hợp (${pair})` }); score += isYear ? 10 : 6; return; }
-      if (isLucHop(bc, otherChi)) { relations.push({ label, text: `lục hợp (${pair})` }); score += isYear ? 10 : 6; return; }
-      if (!isYear && isHaiChi(bc, otherChi)) { relations.push({ label, text: `lục hại (${pair})` }); warnings.push(`lục hại với ${label} (${pair})`); score -= 6; return; }
-      if (isTuHanhXung(bc, otherChi)) { relations.push({ label, text: `bán xung — cùng nhóm tứ hành xung (${pair})` }); warnings.push(`bán xung với ${label} (${pair})`); score -= 4; return; }
-      relations.push({ label, text: 'không xung, hình, hại' });
-    };
-    rel(tChi, tLabel, true);
-    fam.forEach(f => rel(chiOf(f.year), `${f.label} ${getCanChi(f.year)} ${f.year}`, false));
+    // với năm khởi công
+    const pairY = `${CHI[bc]}–${CHI[tChi]}`;
+    if (isTamHop(bc, tChi) || isLucHop(bc, tChi)) { relations.push({ label: tLabel, text: `${isTamHop(bc, tChi) ? 'tam hợp' : 'lục hợp'} (${pairY})` }); score += 6; }
+    else if (isTuHanhXung(bc, tChi)) { relations.push({ label: tLabel, text: `cùng nhóm tứ hành xung (${pairY}) — rất nhẹ` }); note = `Tuổi ${CHI[bc]} với năm ${CHI[tChi]} chỉ kỵ rất nhẹ theo dân gian (không phải xung thẳng), nhiều thầy bỏ qua.`; score -= 1; }
+    else relations.push({ label: tLabel, text: 'không xung, hình, hại' });
+    // với gia chủ, vợ/chồng
+    fam.forEach(f => {
+      const fc = chiOf(f.year), pair = `${CHI[bc]}–${CHI[fc]}`, who = `${f.label} ${getCanChi(f.year)} ${f.year}`;
+      const w = f.label === 'gia chủ' ? 8 : 4;
+      if (hopMaHinh(bc, fc)) { relations.push({ label: who, text: `vừa lục hợp vừa tương hình (${pair})` }); warnings.push(`${f.label}: vừa hợp vừa kỵ nhẹ (${pair})`); plainParts.push(`với ${who}: vừa hợp vừa kỵ nhẹ`); avoid.push(f.label); score -= 2; return; }
+      if (isTamHop(bc, fc) || isLucHop(bc, fc)) { relations.push({ label: who, text: `${isTamHop(bc, fc) ? 'tam hợp' : 'lục hợp'} (${pair})` }); plainParts.push(`với ${who}: hợp tốt`); score += w; return; }
+      if (isHaiChi(bc, fc)) { relations.push({ label: who, text: `lục hại (${pair})` }); warnings.push(`${f.label}: kỵ nhẹ — lục hại (${pair})`); plainParts.push(`với ${who}: kỵ nhẹ`); avoid.push(f.label); score -= 4; return; }
+      if (isTuHanhXung(bc, fc)) { relations.push({ label: who, text: `cùng nhóm tứ hành xung (${pair})` }); warnings.push(`${f.label}: kỵ nhẹ — cùng nhóm tứ hành xung (${pair})`); plainParts.push(`với ${who}: kỵ nhẹ`); avoid.push(f.label); score -= 3; return; }
+      relations.push({ label: who, text: 'không xung, hình, hại' }); plainParts.push(`với ${who}: không kỵ`);
+    });
     const tier: BorrowAge['tier'] = warnings.length ? 'luu_y' : 'tot';
+    const plain = `${y} ${getCanChi(y)} (tuổi mụ ${c.age}) — ${tier === 'tot' ? 'Nên mượn' : 'Mượn được'}. Không phạm hạn năm ${targetYear}${plainParts.length ? '; ' + plainParts.join('; ') : ''}.`;
+    const remedy = avoid.length ? `Lúc động thổ (khấn và cuốc nhát đầu), ${avoid.join(' và ')} tạm tránh ra xa khu đất; xong lễ thì sinh hoạt, thi công bình thường.` : '';
     const why = `tuổi mụ ${c.age}: không Tam Tai, Kim Lâu, Hoang Ốc (${c.hoangOc.name}); ` + relations.map(r => `với ${r.label}: ${r.text}`).join('; ');
-    out.push({ year: y, canChi: getCanChi(y), age: c.age, tier, relations, warnings, why, score: score + (tier === 'tot' ? 100 : 0) });
+    out.push({ year: y, canChi: getCanChi(y), age: c.age, tier, relations, warnings, why, plain, remedy, note, score: score + (tier === 'tot' ? 100 : 0) });
   }
   return out.sort((a, b) => b.score - a.score || a.year - b.year).slice(0, limit).map(({ score, ...r }) => r);
+}
+
+/** Năm gần nhất (sau năm dự kiến) có phương án tốt: gia chủ tự đứng tên được, hoặc có tuổi "Nên mượn" */
+export function nextGoodBuildYear(birthYear: number, fromYear: number, family: FamilyMember[] = [], within = 6): { year: number; canChi: string; how: string } | null {
+  for (let t = fromYear + 1; t <= fromYear + within; t++) {
+    const c = checkBuildYear(birthYear, t);
+    if (c.clean && !c.isTruc) return { year: t, canChi: getCanChi(t), how: 'gia chủ tự đứng tên được' };
+    const tot = findBorrowAgeDetails(t, 3, family).filter(d => d.tier === 'tot');
+    if (tot.length) return { year: t, canChi: getCanChi(t), how: `nên mượn tuổi ${tot.map(d => `${d.year} ${d.canChi}`).join(', ')}` };
+  }
+  return null;
 }
 
 /** Năm gần nhất (trong 12 năm tới) gia chủ tự đứng tên được: không Tam Tai, Kim Lâu, Hoang Ốc, không xung / trùng Thái Tuế */
@@ -763,13 +788,37 @@ export function calculateFengShui(
       : isHaiChi(chiIndex, yc) ? ` Lưu ý: năm ${tCanChi} lục hại với tuổi ${canChi} (${pairY}) — mức nhẹ; nên hỏi thầy địa phương.` : '';
     advice = `Năm ${tCanChi} (${tYear}), gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) không phạm Tam Tai, Kim Lâu, Hoang Ốc${c.isTruc ? '' : ', không xung Thái Tuế'}. Gia chủ có thể tự đứng tên khởi công; cần chọn ngày, giờ hoàng đạo cụ thể hợp tuổi.${yearNote}${c.isTruc ? ' ' + thaiTueDetail : ''}${femaleNote}`;
   } else {
-    const yearOpt = nextYear ? `lùi sang năm ${nextYear.year} ${nextYear.canChi} — năm gần nhất gia chủ tự đứng tên được (không Tam Tai, Kim Lâu, Hoang Ốc, không xung Thái Tuế)${nextYear.note ? '; lưu ý: ' + nextYear.note : ''}` : 'lùi năm khởi công (trong 12 năm tới chưa có năm nào gia chủ tự đứng tên được)';
-    const how = `Người được mượn tuổi nên là nam giới, khỏe mạnh, gia đình êm ấm, ưu tiên người thân. Khi động thổ: người mượn tuổi làm lễ và cuốc nhát đầu, gia chủ tránh mặt lúc đó, sau đó người mượn tuổi "bán" lại nhà tượng trưng cho gia chủ.`;
-    const checked = `(đã xét với năm ${tCanChi} và với ${famStr}: loại tuổi xung, hình, hại với năm; loại tuổi xung, hình với gia đình)`;
+    const yearOpt = nextYear ? `lùi sang năm ${nextYear.year} ${nextYear.canChi} (năm gần nhất gia chủ tự đứng tên được${nextYear.note ? '; ' + nextYear.note : ''})` : 'trong 12 năm tới chưa có năm nào gia chủ tự đứng tên được';
+    const how = `Cách làm: người được mượn tuổi (nam, khỏe mạnh, gia đình êm ấm, ưu tiên người thân) đứng ra khấn và cuốc nhát đất đầu; lúc đó gia chủ tạm tránh ra xa khu đất; làm thủ tục "bán nhà" tượng trưng cho người mượn tuổi, đến lễ nhập trạch gia chủ "mua lại" và về ở.`;
+    const sp = familyYears.find(f => f.label !== 'gia chủ');
+    const spTxt = sp ? ` và ${sp.label} ${getCanChi(sp.year)} ${sp.year}` : '';
+    const head = `Gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) năm ${tCanChi} ${tYear} phạm ${listPham.join(", ")} nên không tự đứng tên khởi công.`;
+    const fmt = (d: BorrowAge) => `${d.year} ${d.canChi}`;
     if (borrowTot.length) {
-      advice = `Năm ${tCanChi} (${tYear}), gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) phạm ${listPham.join(", ")}. Phương án: (1) mượn tuổi người nam đứng tên động thổ, đổ mái — tuổi phù hợp nhất: ${borrowTot.map(d => `${d.year} ${d.canChi}`).join(', ')} ${checked}${borrowLuuY.length ? `; dùng được nhưng có lưu ý: ${borrowLuuY.map(d => `${d.year} ${d.canChi} (${d.warnings.join(', ')})`).join('; ')}` : ''}; hoặc (2) ${yearOpt}. ${how}${femaleNote}`;
+      advice = `Kết luận: vẫn xây được năm ${tYear} — mượn tuổi ${fmt(borrowTot[0])}. ${head} Tuổi nên mượn: ${borrowTot.map(fmt).join(', ')} (không phạm hạn năm ${tYear}, hợp với gia chủ${spTxt})${borrowLuuY.length ? `; mượn được (kỵ nhẹ, có cách xử lý): ${borrowLuuY.map(d => `${fmt(d)} — ${String(d.remedy).replace(/\.$/, '')}`).join('; ')}` : ''}. ${how} Nếu gia chủ muốn tự đứng tên: ${yearOpt}.${femaleNote}`;
+    } else if (borrowLuuY.length) {
+      advice = `Kết luận: vẫn xây được năm ${tYear} — mượn tuổi ${fmt(borrowLuuY[0])}. ${head} Năm nay không có tuổi hợp trọn vẹn với gia chủ${spTxt}; tuổi mượn được: ${borrowLuuY.map(d => `${fmt(d)} (${d.warnings.join(', ')})`).join('; ')}. Cách xử lý: ${borrowLuuY[0].remedy} ${how} Nếu gia chủ muốn tự đứng tên: ${yearOpt}.${femaleNote}`;
     } else {
-      advice = `Năm ${tCanChi} (${tYear}), gia chủ tuổi ${canChi} (${year}, tuổi mụ ${c.age}) phạm ${listPham.join(", ")}. Năm ${tYear} KHÔNG CÓ tuổi mượn hoàn hảo cho gia đình (đã xét mọi tuổi mụ 30–70 với năm ${tCanChi} và với ${famStr}). Ba lựa chọn: (a) ${yearOpt}; (b) ${borrowLuuY.length ? `mượn tuổi dùng được nhưng có lưu ý: ${borrowLuuY.map(d => `${d.year} ${d.canChi} (${d.warnings.join(', ')})`).join('; ')}` : 'không có tuổi mượn dùng được — nên lùi năm'}; (c) nhờ thầy phong thủy địa phương xem trực tiếp. ${how}${femaleNote}`;
+      const spC = sp ? checkBuildYear(sp.year, tYear) : null;
+      const spOk = !!(sp && spC && spC.clean && !spC.isTruc);
+      const nextGood = nextGoodBuildYear(year, tYear, familyYears);
+      const opts: string[] = [];
+      if (spOk) {
+        const sc = chiOf(sp!.year), yc = chiOf(tYear), pr = `${CHI[sc]}–${CHI[yc]}`;
+        const light = isHinhChi(sc, yc) ? ` (tuổi ${CHI[sc]} với năm ${CHI[yc]} tương hình — kỵ nhẹ, nên hỏi thầy địa phương)` : isHaiChi(sc, yc) ? ` (${pr} lục hại — kỵ nhẹ, nên hỏi thầy địa phương)` : '';
+        opts.push(`${sp!.label} ${getCanChi(sp!.year)} ${sp!.year} đứng tên khởi công — năm ${tYear} ${sp!.label} không phạm Tam Tai, Kim Lâu, Hoang Ốc${light}; nhiều nơi chấp nhận vợ/chồng đứng tên thay`);
+      }
+      // tuổi hợp năm nhưng kỵ gia đình → vẫn dùng được nếu người bị kỵ tránh mặt
+      const yearOnly = findBorrowAgeDetails(tYear, 3, []);
+      if (yearOnly.length) {
+        const d = yearOnly[0], bc = chiOf(d.year);
+        const who = familyYears.filter(f => { const fc = chiOf(f.year); return isXungChi(bc, fc) || isHinhChi(bc, fc) || isTuHinh(bc, fc); }).map(f => f.label);
+        opts.push(`mượn tuổi ${d.year} ${d.canChi} (không phạm hạn năm ${tYear} nhưng kỵ ${who.join(' và ') || 'gia đình'}) — ${who.join(' và ') || 'người bị kỵ'} tránh mặt cả lúc động thổ và lúc đổ mái; nên nhờ thầy địa phương xem lại`);
+      } else {
+        opts.push(`năm ${tYear} gần như mọi tuổi 30–70 đều vướng hạn hoặc kỵ năm ${tCanChi}, nên không mượn tuổi được năm này`);
+      }
+      if (nextGood) opts.push(`nếu chưa gấp: khởi công năm ${nextGood.year} ${nextGood.canChi} — ${nextGood.how}`);
+      advice = `Kết luận: ${spOk ? `vẫn xây được năm ${tYear} — ${sp!.label} đứng tên.` : `năm ${tYear} chưa tìm được tuổi mượn hợp với gia chủ${spTxt} (tool đã xét mọi tuổi mụ 30–70).`} ${head} Cách làm: ${opts.map((o, i) => `(${i + 1}) ${o}`).join('; ')}.${femaleNote}`;
     }
   }
 
@@ -949,4 +998,3 @@ export function translateFengShuiAnalysis(analysis: any, lang: string): any {
 
   return clone;
 }
-
