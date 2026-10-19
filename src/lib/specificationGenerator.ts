@@ -76,7 +76,7 @@ export function generateHardcodedBOQText(
   userBudget?: number,
   budgetUnit: string = 'VNĐ',
   layoutModel?: ArchitecturalLayoutModel,
-  co_san_vuon: boolean = true,
+  co_san_vuon: boolean = false,
   constructionInfoForPrice?: any,
   userInfoForPrice?: any
 ): string {
@@ -446,7 +446,7 @@ ${waterproofingRationale}`).normalize('NFC');
         constructionInfo?.totalBudget, 
         constructionInfo?.budgetUnit,
         layout,
-        constructionInfo?.rooms?.garden !== false,
+        constructionInfo?.rooms?.garden === true,
         constructionInfo,
         userInfo
       ).normalize('NFC');

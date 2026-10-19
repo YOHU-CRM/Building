@@ -83,7 +83,8 @@ export function getUnifiedEstimate(input: PricingInput): FullProjectEstimateResu
     so_phong_ngu: Number(ct.rooms?.bedroomCount) || undefined,
     so_wc: Number(ct.rooms?.bathroomCount) || undefined,
     customerAddress: address || 'Miền Bắc',
-    co_san_vuon: ct.rooms?.garden !== false,
+    // Sân vườn chỉ tính khi gia chủ tích ô "Sân vườn" hoặc phác thảo / mô tả có vườn, sân
+    co_san_vuon: ct.rooms?.garden === true || (ct.rooms?.sketchLayout?.ngoai_nha || []).some((o: any) => ['vuon', 'san', 'san_vuon'].includes(String(o?.loai))),
     loai_tran: ct.loai_tran,
     soilType: ct.soilType,
     roofType: ct.loai_mai || ct.constructionType,

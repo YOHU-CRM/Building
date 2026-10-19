@@ -836,11 +836,14 @@ export function planFloor(input: PlannerInput): FloorPlanResult {
   if (hasStair) checks.push({ ok: true, text: `Lõi thang + WC xếp chồng thẳng đứng các tầng (gọn kết cấu, ống thoát) ✓` });
   checks.push({ ok: true, text: 'Cửa chính và cửa sau không thẳng hàng (tránh gió xuyên nhà, "xuyên tâm") ✓' });
 
-  const lotArea = r1(W * L);
+  // Số đo là kích thước NHÀ (mặc định): chỉ tính mật độ khi gia chủ nhập diện tích đất thật
+  const houseMode = (roomsCfg as any).dimsKind !== 'dat';
+  const landIn = Number((roomsCfg as any).landAreaM2) || 0;
+  const lotArea = houseMode ? (landIn || r1(W * L)) : r1(W * L);
   const footprint = r1(W * H);
   const pct = Math.round(footprint / lotArea * 100);
   const maxPct = maxDensityPct(lotArea);
-  checks.push({ ok: pct <= maxPct, text: `Mật độ xây dựng ${pct}% (đất ${lotArea}m², tối đa ~${maxPct}% theo QCVN 01:2021 — cần đối chiếu quy hoạch địa phương)${pct <= maxPct ? ' ✓' : ' ✗ cần tăng khoảng lùi'}.` });
+  if (!houseMode || landIn) checks.push({ ok: pct <= maxPct, text: `Mật độ xây dựng ${pct}% (đất ${lotArea}m²${houseMode ? ' gia chủ nhập' : ''}, tối đa ~${maxPct}% theo QCVN 01:2021 — cần đối chiếu quy hoạch địa phương)${pct <= maxPct ? ' ✓' : ' ✗ cần tăng khoảng lùi'}.` });
 
   const placedTotal = Object.values(bedsPerFloor).reduce((a, b) => a + b, 0);
   if (floor === 1 && placedTotal < totalBeds) {

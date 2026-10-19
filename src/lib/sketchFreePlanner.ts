@@ -896,7 +896,7 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   else sketchNotes.unshift(`✓ Vẽ theo phác thảo tự do: giữ đúng vị trí ${srs.length} phòng (lưới ${R} hàng × ${C} cột)${withArea.length ? `, ${keptArea}/${withArea.length} phòng khớp diện tích ghi tay (±15%)` : ''}.`);
   sketchNotes.unshift(dimsHouse
     ? (sk.nguon === 'o_nhap' ? `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập.` : `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập; bản vẽ tay chỉ dùng để xếp vị trí phòng${withArea.length ? ' (diện tích ghi tay quy đổi theo tỷ lệ)' : ''}.`)
-    : `✓ Nhà ${W} × ${H} m${Hfix ? ` (chiều sâu ${Hfix}m theo phác thảo)` : ''}${Wfix ? ` (chiều ngang ${Wfix}m theo phác thảo)` : ''}${!Hfix && !Wfix && withArea.length ? ' — suy ra từ diện tích ghi trên bản vẽ' : ''}; phần đất còn lại làm sân vườn.`);
+    : `✓ Nhà ${W} × ${H} m${Hfix ? ` (chiều sâu ${Hfix}m theo phác thảo)` : ''}${Wfix ? ` (chiều ngang ${Wfix}m theo phác thảo)` : ''}${!Hfix && !Wfix && withArea.length ? ' — suy ra từ diện tích ghi trên bản vẽ' : ''}; phần quanh nhà là khu vực ngoài nhà minh họa.`);
   (Array.isArray(sk.doc_khong_ro) ? sk.doc_khong_ro : []).slice(0, 4).forEach((t: any) => sketchNotes.push(`? Chưa đọc rõ: "${t}" — anh/chị kiểm tra lại phiếu.`));
   srs.filter(s => s.conf < 0.6).forEach(s => sketchNotes.push(`? "${s.ten || s.loai}" AI đọc chưa chắc — anh/chị kiểm tra lại.`));
 
@@ -905,11 +905,13 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     if (openLit && (r.type === 'dining' || r.type === 'living')) { checks.push({ ok: true, text: `${r.name}: lấy sáng qua ô mở thông với phòng bên cạnh; nên thêm ô kính mái.` }); return; }
     checks.push({ ok: false, text: `${r.name}: không có tường ngoài để mở cửa sổ — nên làm ô kính mái / giếng trời nhỏ lấy sáng.` });
   });
-  const lotArea = r1(lot.w * lot.h);
+  // Kích thước NHÀ: khung quanh nhà chỉ là khu vực minh họa, không phải ranh đất → mật độ chỉ tính khi có diện tích đất thật
+  const landIn = Number((input.rooms as any)?.landAreaM2) || 0;
+  const lotArea = !isLot && landIn ? landIn : r1(lot.w * lot.h);
   const footprint = r1(inside().filter(r => r.type !== 'porch').reduce((n, r) => n + r.w * r.h, 0));
   const pct = Math.round(footprint / lotArea * 100);
   const maxPct = maxDensity(lotArea);
-  checks.push({ ok: pct <= maxPct, text: `Mật độ xây dựng ${pct}% (đất ~${lotArea}m², tối đa ~${maxPct}% theo QCVN 01:2021 — đối chiếu quy hoạch địa phương)${pct <= maxPct ? ' ✓' : ' ✗'}.` });
+  if (isLot || landIn) checks.push({ ok: pct <= maxPct, text: `Mật độ xây dựng ${pct}% (đất ${isLot ? '~' : ''}${lotArea}m²${!isLot ? ' gia chủ nhập' : ''}, tối đa ~${maxPct}% theo QCVN 01:2021 — đối chiếu quy hoạch địa phương)${pct <= maxPct ? ' ✓' : ' ✗'}.` });
   if (mainPt && svc) checks.push({ ok: true, text: 'Cửa chính và cửa phụ không thẳng trục (tránh "xuyên tâm") ✓' });
 
   const totalBeds = inside().filter(r => r.type === 'bedroom' || r.type === 'master').length;

@@ -35,6 +35,9 @@ export interface SiteGeometry {
   densityPct: number;
   maxDensityPct: number;
   densityOk: boolean;
+  /** false = chưa biết diện tích đất thật (gia chủ nhập kích thước NHÀ, chưa nhập diện tích đất) → không tính mật độ, không cảnh báo */
+  densityKnown?: boolean;
+  landAreaM2?: number;
   note: string;
 }
 
@@ -93,7 +96,7 @@ export function setbacksFor(ct: any): { front: any; back: any; left: any; right:
 }
 /** rooms gửi bộ vẽ kèm loại số đo (bộ vẽ phác thảo tự do ưu tiên số đo trong mô tả hơn số trên bản vẽ tay) */
 export function roomsFor(ct: any): any {
-  const r = { ...(ct?.rooms || {}), dimsKind: dimsKindOf(ct) };
+  const r = { ...(ct?.rooms || {}), dimsKind: dimsKindOf(ct), landAreaM2: landAreaOf(ct) };
   // ô "Gara ô tô" trên giao diện là nguồn đúng (trước đây bộ vẽ đọc parkingType mặc định = gara)
   if (r.garage === true) r.parkingType = 'garage';
   else if (r.garage === false && r.parkingType === 'garage') r.parkingType = 'yard';
@@ -119,12 +122,29 @@ export function planDimsFor(ct: any): string {
   return side > 0 ? `${Math.round((parseFloat(m[1]) - side) * 10) / 10}x${m[2]}` : ct.dimensions;
 }
 
+/** Diện tích đất thật gia chủ nhập (m²) — chỉ dùng khi số đo là kích thước NHÀ */
+export function landAreaOf(ct: any): number | undefined {
+  const v = num(ct?.landAreaM2);
+  return v && v > 0 ? r1(v) : undefined;
+}
+/** Mật độ khi số đo là kích thước NHÀ: chỉ tính khi có diện tích đất thật */
+function houseDensity(footprint: number, land?: number) {
+  if (!land) return { densityKnown: false, densityPct: 0, maxDensityPct: 0, densityOk: true, landAreaM2: undefined, text: 'Mật độ xây dựng chỉ tính khi nhập diện tích đất thật (ô "Diện tích đất thực tế" ở Điều kiện khu đất).' };
+  const pct = Math.round(footprint / land * 100), mx = maxDensityPct(land);
+  return { densityKnown: true, densityPct: pct, maxDensityPct: mx, densityOk: pct <= mx, landAreaM2: land, text: `Đất ${land}m² (gia chủ nhập) → mật độ ${pct}%, tối đa ~${mx}%.` };
+}
+
 export function computeSiteFor(ct: any): SiteGeometry {
   const sb = setbacksFor(ct);
   const base0 = computeSite(ct?.dimensions, sb.front, sb.back, sb.left, sb.right);
-  const base = dimsKindOf(ct) === 'nha' && base0.hasDims
-    ? { ...base0, note: `Nhà xây ${base0.lotWidthM}×${base0.houseLengthM}m = ${base0.footprint}m² (đúng số đo gia chủ nhập). Nếu số đo là của thửa đất, chọn "Kích thước thửa đất" để tool trừ khoảng lùi.` }
-    : base0;
+  const isHouse = dimsKindOf(ct) === 'nha';
+  const land = isHouse ? landAreaOf(ct) : undefined;
+  let base: SiteGeometry = base0;
+  if (isHouse && base0.hasDims) {
+    const d = houseDensity(base0.footprint, land);
+    base = { ...base0, densityKnown: d.densityKnown, densityPct: d.densityPct, maxDensityPct: d.maxDensityPct, densityOk: d.densityOk, landAreaM2: d.landAreaM2,
+      note: `Nhà xây ${base0.lotWidthM}×${base0.houseLengthM}m = ${base0.footprint}m² (đúng số đo gia chủ nhập). ${d.text} Nếu số đo là của thửa đất, chọn "Kích thước thửa đất" để tool trừ khoảng lùi.` };
+  } else if (!isHouse) base = { ...base0, densityKnown: base0.hasDims };
   try {
     const floors = Math.max(1, Math.round(Number(ct?.floors) || 1));
     if (!hasFreeSketch(roomsFor(ct), 1, floors)) return base;
@@ -135,6 +155,16 @@ export function computeSiteFor(ct: any): SiteGeometry {
     const lotL = p.lot ? p.lot.h : base.lotLengthM;
     const lotArea = r1(lotW * lotL);
     const footprint = p.density.footprint;
+    if (isHouse) {
+      // khung quanh nhà trên bản vẽ chỉ là khu vực minh họa (hiên, lối đi, bếp phụ…), KHÔNG phải ranh đất → không tính mật độ theo khung này
+      const d = houseDensity(footprint, land);
+      return {
+        hasDims: true, lotWidthM: r1(lotW), lotLengthM: r1(lotL), lotArea: land || lotArea,
+        frontSetbackM: p.frontSetbackM, backSetbackM: p.backSetbackM,
+        houseLengthM: p.houseLengthM, footprint, densityPct: d.densityPct, maxDensityPct: d.maxDensityPct, densityOk: d.densityOk, densityKnown: d.densityKnown, landAreaM2: d.landAreaM2,
+        note: `Vẽ theo phác thảo: nhà ${p.widthM}×${p.houseLengthM}m, diện tích xây dựng ${footprint}m² (không tính hiên) — đúng số đo gia chủ nhập. Phần quanh nhà trên bản vẽ chỉ là khu vực ngoài nhà minh họa (hiên, lối đi, hạng mục gia chủ yêu cầu), không phải ranh đất. ${d.text}`
+      };
+    }
     const pct = Math.round(footprint / lotArea * 100);
     const maxPct = maxDensityPct(lotArea);
     return {

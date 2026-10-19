@@ -856,7 +856,7 @@ export function calculateMasterProjectEstimate(params: {
   const dien_tich_quy_doi = Math.round(dien_tich_xay_dung * (so_tang + K_MONG + K_MAI) * 10) / 10;
   const so_phong_ngu = params.so_phong_ngu;
   const so_wc = Math.max(1, params.so_wc || (so_tang === 1 ? 2 : Math.max(so_tang, 2)));
-  const co_san_vuon = params.co_san_vuon !== undefined ? params.co_san_vuon : true;
+  const co_san_vuon = params.co_san_vuon === true;   // mặc định KHÔNG tính sân vườn
 
   // Helper to compute a single package
   const computePackage = (pkg: FinishingPackageKey) => {

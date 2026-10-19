@@ -93,12 +93,16 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   out.push(`<rect x="0" y="0" width="${VW}" height="96" fill="#0f172a"/>`);
   out.push(`<text x="28" y="40" fill="#fbbf24" font-size="13" font-weight="800" letter-spacing="2">YOHU CONSTECH · BẢN VẼ KIẾN TRÚC SƠ BỘ</text>`);
   out.push(`<text x="28" y="70" fill="#fff" font-size="22" font-weight="900">MẶT BẰNG TẦNG ${plan.floor}/${plan.totalFloors} — ${esc(ctype.toUpperCase())}</text>`);
-  out.push(`<text x="${VW - 28}" y="40" fill="#cbd5e1" font-size="12" text-anchor="end">Lô đất ${free ? '~' : ''}${f1(LOT.w)} × ${f1(LOT.h)} m · ${f1(LOT.w * LOT.h)} m²</text>`);
+  const houseMode = (params.rooms as any)?.dimsKind !== 'dat';
+  const landIn = Number((params.rooms as any)?.landAreaM2) || 0;
+  out.push(`<text x="${VW - 28}" y="40" fill="#cbd5e1" font-size="12" text-anchor="end">${houseMode
+    ? (landIn ? `Đất ${f1(landIn)} m² (gia chủ nhập) · khung vẽ là khu vực quanh nhà, không phải ranh đất` : `Khu vực vẽ ~${f1(LOT.w)} × ${f1(LOT.h)} m — minh họa quanh nhà, không phải ranh đất`)
+    : `Lô đất ${free ? '~' : ''}${f1(LOT.w)} × ${f1(LOT.h)} m · ${f1(LOT.w * LOT.h)} m²`}</text>`);
   out.push(`<text x="${VW - 28}" y="62" fill="#cbd5e1" font-size="12" text-anchor="end">Nhà ${f1(W)} × ${f1(H)} m · sàn ${f1(free ? plan.density.footprint : W * H)} m² · hướng ${esc(plan.facing)}</text>`);
   out.push(`<text x="${VW - 28}" y="84" fill="#94a3b8" font-size="11" text-anchor="end">Gia chủ: ${esc(customer)}</text>`);
 
   /* ── Ranh đất ── */
-  out.push(`<rect x="${px(LOT.x)}" y="${py(LOT.y + LOT.h)}" width="${dW}" height="${dH}" fill="${free ? '#f7fee7' : '#ffffff'}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="8 5"/>`);
+  out.push(`<rect x="${px(LOT.x)}" y="${py(LOT.y + LOT.h)}" width="${dW}" height="${dH}" fill="${free && !houseMode ? '#f7fee7' : '#ffffff'}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="8 5"/>`);
 
   /* ── Phòng ── */
   const inside = plan.rooms.filter(r => !r.outside);
