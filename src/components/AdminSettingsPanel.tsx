@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
  */
 type Settings = {
   videoOrderEnabled: boolean; videoAutoDispatch: boolean; freePreview3D: boolean;
-  serverImageStorage: boolean; ctvCommissionEnabled: boolean; renderLimitPerClient: number;
+  serverImageStorage: boolean; ctvCommissionEnabled: boolean; renderLimitPerClient: number; aiLimitPerHour: number; aiLimitPerDay: number;
 };
 const ITEMS: { key: keyof Settings; title: string; on: string; off: string; confirmOn?: string }[] = [
   { key: 'videoOrderEnabled', title: '🎬 Mục đặt video với khách', on: 'Khách thấy & đặt được gói video', off: 'Ẩn mục video với khách' },
@@ -22,9 +22,11 @@ export default function AdminSettingsPanel() {
   const [msg, setMsg] = useState('');
   const [cid, setCid] = useState('');
   const [limit, setLimit] = useState('');
+  const [aiH, setAiH] = useState('');
+  const [aiD, setAiD] = useState('');
   const code = () => { try { return sessionStorage.getItem('yohu_admin_code') || ''; } catch { return ''; } };
   const load = () => fetch('/api/admin/settings', { headers: { 'x-admin-code': code() } }).then(r => r.json()).then(d => {
-    if (d?.settings) { setSt(d.settings); setLimit(String(d.settings.renderLimitPerClient ?? 15)); }
+    if (d?.settings) { setSt(d.settings); setLimit(String(d.settings.renderLimitPerClient ?? 15)); setAiH(String(d.settings.aiLimitPerHour ?? 40)); setAiD(String(d.settings.aiLimitPerDay ?? 150)); }
     if (d?.status) setStatus(d.status);
     if (!d?.ok) setMsg(d?.error || 'Không đọc được cài đặt (mã admin?)');
   }).catch(e => setMsg(String(e)));
@@ -82,6 +84,15 @@ export default function AdminSettingsPanel() {
               {it.key === 'serverImageStorage' && st.serverImageStorage && status && !status.storageBucket && <div className="mt-1 text-[11px] text-amber-300">Đang bật nhưng chưa có Storage → ảnh vẫn lưu trên máy khách. Xem hướng dẫn bật Storage.</div>}
             </div>
           ))}
+          <div className={card}>
+            <div className="font-black text-sm">🛡️ Giới hạn gọi AI (chống tốn tín dụng)</div>
+            <div className="text-xs text-slate-400 mb-2">Áp dụng cho phân tích phong thủy, công trình, hỏi đáp, đọc bản vẽ, thuyết minh, ảnh — tính theo từng máy (IP). Admin không bị giới hạn. Đặt 0 = không giới hạn.</div>
+            <div className="flex gap-2 items-center flex-wrap text-xs">
+              <span>Mỗi giờ</span><input type="number" min={0} max={500} value={aiH} onChange={e => setAiH(e.target.value)} className="w-20 p-2 rounded-lg bg-slate-900 border border-slate-700 text-sm" />
+              <span>Mỗi ngày</span><input type="number" min={0} max={500} value={aiD} onChange={e => setAiD(e.target.value)} className="w-20 p-2 rounded-lg bg-slate-900 border border-slate-700 text-sm" />
+              <button onClick={() => save({ aiLimitPerHour: Number(aiH) || 0, aiLimitPerDay: Number(aiD) || 0 })} className="px-3 py-2 rounded-lg bg-amber-500 text-slate-950 text-xs font-black cursor-pointer">Lưu</button>
+            </div>
+          </div>
           <div className={card}>
             <div className="font-black text-sm">🎨 Số lượt AI vẽ ảnh tối đa / khách</div>
             <div className="text-xs text-slate-400 mb-2">Bộ đầy đủ ≈ 3 phương án + 5 ảnh + 2 lần vẽ lại = 10 lượt. Đặt 0 = không giới hạn.</div>

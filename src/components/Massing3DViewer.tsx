@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { buildMassing, floorColor, MatKey, Prim } from '../lib/massingModel';
+import { tx } from '../lib/i18nExtra';
 
 /**
  * 3D HÌNH KHỐI — dựng từ chính mặt bằng 2D (cùng bộ lập mặt bằng), không gọi API, xoay được trên điện thoại.
@@ -18,6 +19,8 @@ interface Props {
   frontSetbackM?: number | string;
   backSetbackM?: number | string;
   roofType?: string;
+  floorHeight1?: number | string;
+  floorHeightUpper?: number | string;
   customerName?: string;
   /** ảnh chụp 3D (PNG data URL) — dùng cho bước ảnh phối cảnh */
   onSnapshot?: (dataUrl: string) => void;
@@ -114,7 +117,7 @@ function gableGeometry(p: Extract<Prim, { t: 'gable' }>) {
   return g;
 }
 
-export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, lang = 'vi', fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, customerName, onSnapshot, onLockMassing, lockedAt, onVideoReady, preview }: Props) {
+export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, lang = 'vi', fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, customerName, onSnapshot, onLockMassing, lockedAt, onVideoReady, preview }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const ctxRef = useRef<Ctx | null>(null);
   const [view, setView] = useState<number>(0);          // 0 = toàn nhà, k = xem tầng k (bóc mái & các tầng trên)
@@ -124,10 +127,10 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
   const { w, l } = parseDims(dimensions);
   const built = useMemo(() => {
     try {
-      return { model: buildMassing({ widthM: w, lengthM: l, totalFloors: Math.max(1, floors || 1), rooms, fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType }), error: null as string | null };
+      return { model: buildMassing({ widthM: w, lengthM: l, totalFloors: Math.max(1, floors || 1), rooms, fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper }), error: null as string | null };
     } catch (e: any) { return { model: null, error: 'Chưa dựng được 3D: ' + String(e?.message || e) }; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [w, l, floors, JSON.stringify(rooms || {}), desiredDirection, frontSetbackM, backSetbackM, roofType, JSON.stringify(fengShuiAnalysis?.favorableDirections || [])]);
+  }, [w, l, floors, JSON.stringify(rooms || {}), desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, JSON.stringify(fengShuiAnalysis?.favorableDirections || [])]);
   const model = built.model;
   useEffect(() => { setErr(built.error); }, [built]);
 
@@ -304,6 +307,7 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
       c.camera.position.copy(pos); c.controls.update(); applyView(c, viewRef.current, 'normal');
     };
   };
+  const T = (v: string, vars?: Record<string, string | number>) => tx(lang, v, vars);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
 
@@ -321,7 +325,7 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
     });
     restore();
     onLockMassing(shots);
-    setLockMsg('✓ Đã chốt hình khối — 5 góc đã gửi sang "Ảnh phối cảnh"');
+    setLockMsg(T('✓ Đã chốt hình khối — 5 góc đã gửi sang "Ảnh phối cảnh"'));
     setTimeout(() => setLockMsg(''), 4000);
   };
 
@@ -415,35 +419,35 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
     <div className={`mt-6 p-4 sm:p-6 rounded-2xl border ${dark ? 'bg-[#101524] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900 shadow-sm'}`}>
       <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
         <div>
-          <h4 className="text-sm sm:text-base font-black uppercase tracking-tight">🧊 {lang === 'vi' ? '3D Hình Khối — dựng từ mặt bằng' : '3D Massing Model'}</h4>
+          <h4 className="text-sm sm:text-base font-black uppercase tracking-tight">🧊 {T('3D Hình Khối — dựng từ mặt bằng')}</h4>
           <p className="text-xs text-slate-400">{model ? model.summary.join(' · ') : ''}</p>
         </div>
         {!preview && <div className="flex flex-wrap gap-2">
-          {onLockMassing && <button onClick={lockMassing} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{lockMsg ? '✓ Đã chốt' : lockedAt ? '🔒 Chốt lại hình khối' : '✅ Chốt hình khối (5 góc)'}</button>}
-          <button onClick={recordVideo} disabled={rec !== null} className="px-4 py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer disabled:opacity-70">{rec !== null ? `⏺ Đang quay ${rec}%…` : '🎬 Quay video 3D'}</button>
+          {onLockMassing && <button onClick={lockMassing} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{T(lockMsg ? '✓ Đã chốt' : lockedAt ? '🔒 Chốt lại hình khối' : '✅ Chốt hình khối (5 góc)')}</button>}
+          <button onClick={recordVideo} disabled={rec !== null} className="px-4 py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer disabled:opacity-70">{rec !== null ? T('⏺ Đang quay {n}%…', { n: rec }) : T('🎬 Quay video 3D')}</button>
           {onSnapshot && !onLockMassing && <button onClick={useForPerspective} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{sent ? '✓ Đã gửi sang Ảnh phối cảnh' : '🎨 Dùng làm khung ảnh phối cảnh'}</button>}
           <button onClick={snapshot} className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">📸 {lang === 'vi' ? 'Tải ảnh 3D (PNG)' : 'Download PNG'}</button>
         </div>}
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
-        <button className={btn(view === 0)} onClick={() => setView(0)}>🏠 Toàn nhà</button>
+        <button className={btn(view === 0)} onClick={() => setView(0)}>{T('🏠 Toàn nhà')}</button>
         {model && Array.from({ length: model.floors }, (_, i) => i + 1).map(f => (
-          <button key={f} className={btn(view === f)} onClick={() => setView(f)}>Xem trong tầng {f}</button>
+          <button key={f} className={btn(view === f)} onClick={() => setView(f)}>{T('Xem trong tầng {f}', { f })}</button>
         ))}
         <span className="w-px bg-slate-500/30 mx-1" />
-        <button className={btn(false)} onClick={() => setCam('corner')}>Góc chéo</button>
-        <button className={btn(false)} onClick={() => setCam('front')}>Mặt tiền</button>
-        <button className={btn(false)} onClick={() => setCam('top')}>Nhìn từ trên</button>
-        <button className={btn(autoRotate)} onClick={() => setAutoRotate(v => !v)}>{autoRotate ? '⏸ Dừng xoay' : '🔄 Tự xoay'}</button>
+        <button className={btn(false)} onClick={() => setCam('corner')}>{T('Góc chéo')}</button>
+        <button className={btn(false)} onClick={() => setCam('front')}>{T('Mặt tiền')}</button>
+        <button className={btn(false)} onClick={() => setCam('top')}>{T('Nhìn từ trên')}</button>
+        <button className={btn(autoRotate)} onClick={() => setAutoRotate(v => !v)}>{T(autoRotate ? '⏸ Dừng xoay' : '🔄 Tự xoay')}</button>
       </div>
 
       <div ref={wrapRef} className={`relative w-full h-[420px] sm:h-[540px] rounded-xl overflow-hidden border ${dark ? 'border-slate-800' : 'border-slate-200'}`}>
         {err && <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-amber-500">{err}</div>}
-        {preview && <div className="absolute top-2 right-2 px-3 py-1.5 rounded-lg bg-purple-700/90 text-white text-[11px] font-black pointer-events-none">BẢN XEM THỬ</div>}
-        {rec !== null && <div className="absolute top-2 left-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-black pointer-events-none animate-pulse">⏺ Đang quay video — giữ màn hình mở ({rec}%)</div>}
+        {preview && <div className="absolute top-2 right-2 px-3 py-1.5 rounded-lg bg-purple-700/90 text-white text-[11px] font-black pointer-events-none">{T('BẢN XEM THỬ')}</div>}
+        {rec !== null && <div className="absolute top-2 left-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-black pointer-events-none animate-pulse">{T('⏺ Đang quay video — giữ màn hình mở ({n}%)', { n: rec })}</div>}
         <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-md bg-slate-950/80 text-[10px] sm:text-[11px] text-slate-200 pointer-events-none">
-          Kéo 1 ngón: xoay · chụm 2 ngón: phóng to · kéo 2 ngón: di chuyển
+          {T('Kéo 1 ngón: xoay · chụm 2 ngón: phóng to · kéo 2 ngón: di chuyển')}
         </div>
       </div>
       {(lockMsg || lockedAt) && !preview && <div className="mt-2 text-xs font-bold text-emerald-500">{lockMsg || `🔒 Hình khối đã chốt lúc ${new Date(lockedAt!).toLocaleString('vi-VN')}. Sửa mặt bằng xong thì bấm "Chốt lại hình khối".`}</div>}
@@ -451,13 +455,13 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
         <div className="mt-3 p-3 rounded-xl border border-purple-500/40 bg-purple-500/5">
           <div className="text-xs font-black mb-2">🎬 Video 3D vừa quay ({video.ext.toUpperCase()}, ~{Math.round((12 + 3.5 * (model?.floors || 1) + 2.5))} giây)</div>
           <video src={video.url} controls playsInline className="w-full max-h-[360px] rounded-lg bg-black" />
-          <a href={video.url} download={`Video_3D_${String(customerName || 'nha').replace(/\s+/g, '_')}.${video.ext}`} className="inline-block mt-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-black">⬇ Tải video về máy</a>
+          <a href={video.url} download={`Video_3D_${String(customerName || 'nha').replace(/\s+/g, '_')}.${video.ext}`} className="inline-block mt-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-black">{T('⬇ Tải video về máy')}</a>
           {video.ext === 'webm' && <span className="ml-2 text-[11px] text-slate-400">File .webm xem được trên Chrome, Zalo PC, YouTube. iPhone cũ có thể cần đổi sang MP4.</span>}
         </div>
       )}
-      {preview && <div className="mt-2 text-xs text-purple-500 font-bold">Bản xem thử: xoay xem hình khối nhà của anh/chị. Mở gói Thiết kế để chốt hình khối, tạo ảnh phối cảnh, quay video và tải bản vẽ.</div>}
+      {preview && <div className="mt-2 text-xs text-purple-500 font-bold">{T('Bản xem thử: xoay xem hình khối nhà của anh/chị. Mở gói Thiết kế để chốt hình khối, tạo ảnh phối cảnh, quay video và tải bản vẽ.')}</div>}
       <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
-        Mô hình khối minh họa tỷ lệ, số tầng, mái, cửa và hướng nhà theo đúng mặt bằng 2D (chữ B = hướng Bắc). Vật liệu, màu sắc, chi tiết mặt tiền sẽ được thể hiện ở bước ảnh phối cảnh.
+        {T('Mô hình khối minh họa tỷ lệ, số tầng, mái, cửa và hướng nhà theo đúng mặt bằng 2D (chữ B = hướng Bắc). Vật liệu, màu sắc, chi tiết mặt tiền sẽ được thể hiện ở bước ảnh phối cảnh.')}
       </p>
     </div>
   );

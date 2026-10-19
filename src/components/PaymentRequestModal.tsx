@@ -8,6 +8,10 @@ interface PaymentRequestModalProps {
   customerPhone: string;
   hotline: string;
   bankInfo?: string; // VD: "Vietcombank - 0123456789 - CONG TY YOHU"
+  /** QR VietQR (biến BANK_ID, BANK_ACCOUNT, BANK_ACCOUNT_NAME trên Vercel) */
+  bankQr?: { bankId: string; account: string; name: string } | null;
+  /** số tiền gói (đồng) — in sẵn trong mã QR */
+  amount?: number;
   onClose: () => void;
   onCheckAgain: () => Promise<boolean>;
   onRedeemCode: (code: string) => Promise<boolean>;
@@ -23,8 +27,9 @@ const TIER_INFO = {
  * (hoặc khách nhập mã kích hoạt hợp lệ do admin cấp).
  */
 export const PaymentRequestModal: React.FC<PaymentRequestModalProps> = ({
-  theme, tier, clientId, customerName, customerPhone, hotline, bankInfo, onClose, onCheckAgain, onRedeemCode
+  theme, tier, clientId, customerName, customerPhone, hotline, bankInfo, bankQr, amount, onClose, onCheckAgain, onRedeemCode
 }) => {
+  const [reported, setReported] = useState<'' | 'sending' | 'ok' | 'err'>('');
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
   const [code, setCode] = useState('');
@@ -32,6 +37,15 @@ export const PaymentRequestModal: React.FC<PaymentRequestModalProps> = ({
   const info = TIER_INFO[tier];
   const dark = theme === 'dark';
   const transferNote = `YOHU ${clientId}`;
+  const money = Math.max(0, Math.round(Number(amount) || 0));
+  const qrUrl = bankQr ? `https://img.vietqr.io/image/${encodeURIComponent(bankQr.bankId)}-${encodeURIComponent(bankQr.account)}-compact2.png?amount=${money}&addInfo=${encodeURIComponent(transferNote)}&accountName=${encodeURIComponent(bankQr.name || '')}` : '';
+  const reportPaid = async () => {
+    setReported('sending');
+    try {
+      const r = await fetch('/api/payment-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, goi: tier, amount: money, name: customerName, phone: customerPhone, transferNote }) });
+      setReported(r.ok ? 'ok' : 'err');
+    } catch { setReported('err'); }
+  };
   const zaloPhone = hotline.replace(/\D/g, '');
 
   const copy = (text: string) => {
@@ -56,6 +70,13 @@ export const PaymentRequestModal: React.FC<PaymentRequestModalProps> = ({
           {info.items.map(i => <li key={i}>✓ {i}</li>)}
         </ul>
 
+        {qrUrl && (
+          <div className={`rounded-xl p-3 mb-3 border text-center ${dark ? 'bg-white border-slate-700' : 'bg-white border-slate-200'}`}>
+            <img src={qrUrl} alt="Mã QR chuyển khoản" className="mx-auto w-56 h-56 object-contain" />
+            <div className="text-xs text-slate-700 mt-1">Quét bằng app ngân hàng: đã điền sẵn <b>{money.toLocaleString('vi-VN')}đ</b> và nội dung <b className="font-mono">{transferNote}</b></div>
+            {bankQr?.name && <div className="text-[11px] text-slate-500">Chủ tài khoản: {bankQr.name} · STK {bankQr.account}</div>}
+          </div>
+        )}
         <div className={`rounded-xl p-3.5 mb-3 text-sm border ${dark ? 'bg-slate-900 border-slate-700' : 'bg-amber-50 border-amber-200'}`}>
           <div className="font-black mb-1.5">Cách thanh toán (3 bước)</div>
           <ol className="list-decimal pl-5 space-y-1">
@@ -66,7 +87,7 @@ export const PaymentRequestModal: React.FC<PaymentRequestModalProps> = ({
               Nội dung chuyển khoản: <b className="font-mono">{transferNote}</b>{' '}
               <button onClick={() => copy(transferNote)} className="text-xs underline cursor-pointer text-blue-500">sao chép</button>
             </li>
-            <li>Sau khi Yohu xác nhận (thường 5–15 phút giờ hành chính), bấm <b>"Tôi đã thanh toán – kiểm tra"</b>.</li>
+            <li>Chuyển xong bấm <b>"Tôi đã chuyển khoản"</b>. Yohu đối chiếu và mở gói (thường 5–15 phút giờ hành chính), sau đó bấm <b>"Kiểm tra gói"</b>.</li>
           </ol>
           <div className="mt-2 text-xs opacity-80">
             Mã hồ sơ của bạn: <b className="font-mono">{clientId}</b>
@@ -75,6 +96,10 @@ export const PaymentRequestModal: React.FC<PaymentRequestModalProps> = ({
           </div>
         </div>
 
+        <button onClick={reportPaid} disabled={reported === 'sending' || reported === 'ok'} className="w-full mb-2 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm cursor-pointer disabled:opacity-70">
+          {reported === 'ok' ? '✓ Đã báo Yohu — đang chờ xác nhận' : reported === 'sending' ? 'Đang gửi…' : `Tôi đã chuyển khoản${money ? ' ' + money.toLocaleString('vi-VN') + 'đ' : ''}`}
+        </button>
+        {reported === 'err' && <div className="text-xs text-rose-500 mb-2">Chưa gửi được — vui lòng nhắn Zalo cho Yohu kèm ảnh chuyển khoản.</div>}
         <div className="grid grid-cols-2 gap-2 mb-3">
           <a
             href={`https://zalo.me/${zaloPhone}`}
@@ -94,7 +119,7 @@ export const PaymentRequestModal: React.FC<PaymentRequestModalProps> = ({
             }}
             className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-sm cursor-pointer"
           >
-            {checking ? 'Đang kiểm tra…' : 'Tôi đã thanh toán – kiểm tra'}
+            {checking ? 'Đang kiểm tra…' : 'Kiểm tra gói'}
           </button>
         </div>
         {checkMsg && <div className="text-sm mb-3">{checkMsg}</div>}

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import PrivacyNotice, { CompanyInfo } from './PrivacyNotice';
 import { getDefaultConstructionYear, getCurrentLunarYear, getCanChi } from '../lib/fengshui';
 import { UserInfo, FengShuiAnalysis, AIResultReport } from '../types';
 import { FengShuiResultCard } from './FengShuiResultCard';
@@ -22,6 +23,9 @@ interface StepAUserInfoFormProps {
   fengshuiCalculating: boolean;
   fengShuiAnalysis: FengShuiAnalysis | null;
   onProceedStepB: () => void;
+  company?: CompanyInfo | null;
+  hotline?: string;
+  lang?: string;
 }
 
 export const StepAUserInfoForm: React.FC<StepAUserInfoFormProps> = ({
@@ -43,7 +47,17 @@ export const StepAUserInfoForm: React.FC<StepAUserInfoFormProps> = ({
   fengshuiCalculating,
   fengShuiAnalysis,
   onProceedStepB,
+  company,
+  hotline,
+  lang = 'vi',
 }) => {
+  const [showPolicy, setShowPolicy] = useState(false);
+  const consented = !!(userInfo as any).consentAt || isAdminAuthenticated;
+  const vi = lang === 'vi';
+  const needConsent = (fn: () => void) => () => {
+    if (!consented) { alert(vi ? 'Vui lòng tích ô đồng ý xử lý dữ liệu cá nhân trước khi tiếp tục.' : 'Please tick the personal-data consent box first.'); return; }
+    fn();
+  };
   return (
     <div className={`rounded-2xl border ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'} overflow-hidden shadow-md shadow-slate-950/20`}>
       <div 
@@ -274,8 +288,19 @@ export const StepAUserInfoForm: React.FC<StepAUserInfoFormProps> = ({
           />
         </div>
 
+        {/* ĐỒNG Ý XỬ LÝ DỮ LIỆU CÁ NHÂN (Nghị định 13/2023) */}
+        <label className={`flex items-start gap-2.5 p-3 rounded-2xl border text-xs sm:text-sm cursor-pointer ${consented ? (theme === 'dark' ? 'border-emerald-700/50 bg-emerald-900/10' : 'border-emerald-300 bg-emerald-50') : (theme === 'dark' ? 'border-amber-600/50 bg-amber-900/10' : 'border-amber-300 bg-amber-50')}`}>
+          <input type="checkbox" className="mt-0.5 w-5 h-5 shrink-0" checked={!!(userInfo as any).consentAt}
+            onChange={e => setUserInfo({ ...userInfo, consentAt: e.target.checked ? new Date().toISOString() : '' } as any)} />
+          <span className={theme === 'dark' ? 'text-slate-200' : 'text-slate-800'}>
+            {vi ? <>Tôi đồng ý cho {company?.name || 'Yohu ConsTech'} xử lý thông tin cá nhân ở trên để tính phong thủy, lập dự toán, bản vẽ và liên hệ tư vấn, theo </> : <>I agree that {company?.name || 'Yohu ConsTech'} processes the personal data above to produce my results and contact me, under the </>}
+            <button type="button" onClick={e => { e.preventDefault(); setShowPolicy(true); }} className="underline font-bold text-blue-500 cursor-pointer">{vi ? 'Chính sách bảo vệ dữ liệu cá nhân' : 'personal data policy'}</button>.
+          </span>
+        </label>
+        {showPolicy && <PrivacyNotice company={company} hotline={hotline} lang={lang} onClose={() => setShowPolicy(false)} />}
+
         <button 
-          onClick={triggerFengshuiExport}
+          onClick={needConsent(triggerFengshuiExport)}
           disabled={fengshuiCalculating}
           className="w-full mt-2 p-3.5 sm:p-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-sm sm:text-base font-black rounded-2xl transition cursor-pointer shadow-md min-h-[48px]"
         >
@@ -291,7 +316,7 @@ export const StepAUserInfoForm: React.FC<StepAUserInfoFormProps> = ({
         {/* Navigation Step B */}
         <button
           type="button"
-          onClick={onProceedStepB}
+          onClick={needConsent(onProceedStepB)}
           className="w-full mt-4 p-4 sm:p-5 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl transition cursor-pointer flex items-center justify-center gap-1.5 text-sm sm:text-base shadow-lg shadow-red-700/20 min-h-[50px]"
         >
           {t.btnProceedStepB}

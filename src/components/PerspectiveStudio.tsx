@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { MassingShot } from './Massing3DViewer';
+import { tx, txRoom } from '../lib/i18nExtra';
 
 /**
  * BỘ ẢNH PHỐI CẢNH NHẤT QUÁN — 3 bước:
@@ -49,13 +50,15 @@ interface Props {
   onShot: (s: StudioShot) => void;
   onOpenMassing: () => void;
   setZoomImage: (url: string) => void;
+  lang?: string;
 }
 
 const STYLES = ['Theo ảnh tham chiếu của gia chủ', 'Hiện đại', 'Tối giản', 'Tân cổ điển', 'Đông Dương (Indochine)', 'Nhà vườn mái ngói truyền thống', 'Nhà mái Thái', 'Nhiệt đới (Tropical)'];
 const MAX_REDO = 2;
 const EMPTY: StudioState = { candidates: [], locked: null, set: [], redoLeft: MAX_REDO };
 
-export default function PerspectiveStudio({ theme, referenceImages, massingShots, interiorRooms, storageKey, packageTier, requestImage, onShot, onOpenMassing, setZoomImage }: Props) {
+export default function PerspectiveStudio({ theme, referenceImages, massingShots, interiorRooms, storageKey, packageTier, requestImage, onShot, onOpenMassing, setZoomImage, lang = 'vi' }: Props) {
+  const T = (v: string, vars?: Record<string, string | number>) => tx(lang, v, vars);
   const dark = theme === 'dark';
   const hasRefs = referenceImages.length > 0;
   const [st, setSt] = useState<StudioState>(EMPTY);
@@ -149,41 +152,41 @@ export default function PerspectiveStudio({ theme, referenceImages, massingShots
   return (
     <div id="yohu-perspective" className={`mt-6 p-4 rounded-xl border space-y-3 ${dark ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h4 className={`text-xs sm:text-sm font-black uppercase tracking-wider ${dark ? 'text-[#FFD700]' : 'text-slate-800'}`}>🎨 Bộ ảnh phối cảnh theo yêu cầu gia chủ</h4>
-        {quota && <span className="text-[11px] text-slate-400">Đã dùng {quota.used}/{quota.limit} lượt vẽ AI</span>}
+        <h4 className={`text-xs sm:text-sm font-black uppercase tracking-wider ${dark ? 'text-[#FFD700]' : 'text-slate-800'}`}>{T('🎨 Bộ ảnh phối cảnh theo yêu cầu gia chủ')}</h4>
+        {quota && <span className="text-[11px] text-slate-400">{T('Đã dùng {a}/{b} lượt vẽ AI', { a: quota.used, b: quota.limit })}</span>}
       </div>
       <p className="text-[12px] lg:text-xs text-slate-400 leading-relaxed">
-        Hình khối lấy đúng từ 3D (số tầng, mái, cửa). Gia chủ chọn 1 phong cách, tool vẽ cả bộ ảnh <b>cùng màu, cùng vật liệu</b> từ nhiều góc. {packageTier === 'design' ? '' : 'Gói Thiết kế.'}
+        {lang === 'vi' ? <>Hình khối lấy đúng từ 3D (số tầng, mái, cửa). Gia chủ chọn 1 phong cách, tool vẽ cả bộ ảnh <b>cùng màu, cùng vật liệu</b> từ nhiều góc. {packageTier === 'design' ? '' : 'Gói Thiết kế.'}</> : T('Hình khối lấy đúng từ 3D (số tầng, mái, cửa). Gia chủ chọn 1 phong cách, tool vẽ cả bộ ảnh cùng màu, cùng vật liệu từ nhiều góc.')}
       </p>
 
       {/* ① hình khối */}
       <div className={box}>
-        {step('1', 'Chốt hình khối 3D', massingShots.length > 0)}
+        {step('1', T('Chốt hình khối 3D'), massingShots.length > 0)}
         {massingShots.length ? (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {massingShots.map(s => (
               <figure key={s.key} className="shrink-0 w-28 sm:w-32 cursor-zoom-in" onClick={() => setZoomImage(s.url)}>
                 <img src={s.url} alt={s.label} className="w-full aspect-video object-cover rounded-lg border border-slate-500/30" />
-                <figcaption className="text-[10px] text-slate-400 mt-0.5">{s.label}</figcaption>
+                <figcaption className="text-[10px] text-slate-400 mt-0.5">{T(s.label)}</figcaption>
               </figure>
             ))}
           </div>
         ) : (
           <div className="text-xs text-amber-500">
             Mở tab <b>🧊 3D Hình Khối</b>, kiểm tra nhà đúng ý rồi bấm <b>"✅ Chốt hình khối (5 góc)"</b>.
-            <button onClick={onOpenMassing} className="ml-2 underline font-bold cursor-pointer">Mở 3D</button>
+            <button onClick={onOpenMassing} className="ml-2 underline font-bold cursor-pointer">{T('Mở 3D')}</button>
           </div>
         )}
       </div>
 
       {/* ② phong cách */}
       <div className={`${box} ${massingShots.length ? '' : 'opacity-50 pointer-events-none'}`}>
-        {step('2', 'Chọn phong cách — AI vẽ 3 phương án cùng 1 góc', !!locked)}
+        {step('2', T('Chọn phong cách — AI vẽ 3 phương án cùng 1 góc'), !!locked)}
         {locked ? (
           <div className="flex items-center gap-3 flex-wrap">
             <img src={locked.url} alt="phong cách đã chốt" className="w-36 aspect-video object-cover rounded-lg border-2 border-emerald-500 cursor-zoom-in" onClick={() => setZoomImage(locked.url)} />
-            <div className="text-xs"><div className="font-black text-emerald-500">✓ Đã chốt: {locked.style}</div>
-              <button onClick={() => save({ ...st, locked: null, set: [], redoLeft: MAX_REDO })} className="mt-1 underline text-slate-400 cursor-pointer">Đổi phong cách (vẽ lại bộ ảnh)</button></div>
+            <div className="text-xs"><div className="font-black text-emerald-500">{T('✓ Đã chốt: {s}', { s: locked.style })}</div>
+              <button onClick={() => save({ ...st, locked: null, set: [], redoLeft: MAX_REDO })} className="mt-1 underline text-slate-400 cursor-pointer">{T('Đổi phong cách (vẽ lại bộ ảnh)')}</button></div>
           </div>
         ) : (
           <div className="space-y-2">
@@ -193,17 +196,17 @@ export default function PerspectiveStudio({ theme, referenceImages, massingShots
               ))}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input value={extra} onChange={e => setExtra(e.target.value)} placeholder="Yêu cầu thêm: sơn trắng, ốp đá xám, cửa gỗ…" className={inp} />
-              {hasRefs && <label className="text-xs flex items-center gap-2 font-bold"><input type="checkbox" checked={useRefs} onChange={e => setUseRefs(e.target.checked)} /> Bám theo {Math.min(3, referenceImages.length)} ảnh tham chiếu của gia chủ</label>}
+              <input value={extra} onChange={e => setExtra(e.target.value)} placeholder={T('Yêu cầu thêm: sơn trắng, ốp đá xám, cửa gỗ…')} className={inp} />
+              {hasRefs && <label className="text-xs flex items-center gap-2 font-bold"><input type="checkbox" checked={useRefs} onChange={e => setUseRefs(e.target.checked)} /> {T('Bám theo {n} ảnh tham chiếu của gia chủ', { n: Math.min(3, referenceImages.length) })}</label>}
             </div>
-            <button onClick={genStyles} disabled={!!busy || !styles.length} className={big}>{busy || `🎨 Vẽ ${styles.length} phương án phong cách`}</button>
+            <button onClick={genStyles} disabled={!!busy || !styles.length} className={big}>{busy || T('🎨 Vẽ {n} phương án phong cách', { n: styles.length })}</button>
             {st.candidates.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {st.candidates.map(c => (
                   <div key={c.key} className="rounded-xl overflow-hidden border border-slate-500/30">
                     <img src={c.url} alt={c.style} className="w-full aspect-video object-cover cursor-zoom-in" onClick={() => setZoomImage(c.url)} />
                     <div className="p-2 flex items-center justify-between gap-2"><span className="text-[11px] font-bold">{c.style}</span>
-                      <button onClick={() => save({ ...st, locked: c, set: [], redoLeft: MAX_REDO })} className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-black cursor-pointer">✓ Chốt phong cách này</button></div>
+                      <button onClick={() => save({ ...st, locked: c, set: [], redoLeft: MAX_REDO })} className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-black cursor-pointer">{T('✓ Chốt phong cách này')}</button></div>
                   </div>
                 ))}
               </div>
@@ -214,28 +217,28 @@ export default function PerspectiveStudio({ theme, referenceImages, massingShots
 
       {/* ③ bộ ảnh */}
       <div className={`${box} ${locked ? '' : 'opacity-50 pointer-events-none'}`}>
-        {step('3', 'Bộ ảnh hoàn chỉnh theo phong cách đã chốt', st.set.length > 0 && pick.every(k => st.set.some(s => s.key === k)))}
+        {step('3', T('Bộ ảnh hoàn chỉnh theo phong cách đã chốt'), st.set.length > 0 && pick.every(k => st.set.some(s => s.key === k)))}
         <div className="flex flex-wrap gap-1.5 mb-2">
-          {exteriorKeys.map(k => <button key={k} onClick={() => setPick(a => toggle(a, k))} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border ${pick.includes(k) ? 'bg-sky-600 text-white border-sky-600' : dark ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>{pick.includes(k) ? '✓ ' : ''}{shot(k)?.label}</button>)}
-          {interiorRooms.map(r => <button key={r.key} onClick={() => setPick(a => toggle(a, 'in_' + r.key))} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border ${pick.includes('in_' + r.key) ? 'bg-violet-600 text-white border-violet-600' : dark ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>{pick.includes('in_' + r.key) ? '✓ ' : ''}Nội thất {r.label}</button>)}
+          {exteriorKeys.map(k => <button key={k} onClick={() => setPick(a => toggle(a, k))} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border ${pick.includes(k) ? 'bg-sky-600 text-white border-sky-600' : dark ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>{pick.includes(k) ? '✓ ' : ''}{T(shot(k)?.label || '')}</button>)}
+          {interiorRooms.map(r => <button key={r.key} onClick={() => setPick(a => toggle(a, 'in_' + r.key))} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border ${pick.includes('in_' + r.key) ? 'bg-violet-600 text-white border-violet-600' : dark ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>{pick.includes('in_' + r.key) ? '✓ ' : ''}{T('Nội thất {r}', { r: txRoom(lang, r.label) })}</button>)}
         </div>
-        <button onClick={genSet} disabled={!!busy || !pick.length} className={big}>{busy || `🖼️ Vẽ bộ ${pick.filter(k => !st.set.some(s => s.key === k)).length} ảnh còn thiếu`}</button>
+        <button onClick={genSet} disabled={!!busy || !pick.length} className={big}>{busy || T('🖼️ Vẽ bộ {n} ảnh còn thiếu', { n: pick.filter(k => !st.set.some(s => s.key === k)).length })}</button>
         {st.set.length > 0 && (
           <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
             {st.set.map(s => (
               <div key={s.key} className="rounded-xl overflow-hidden border border-slate-500/30">
                 <img src={s.url} alt={s.label} className="w-full aspect-video object-cover cursor-zoom-in" onClick={() => setZoomImage(s.url)} />
                 <div className="p-1.5 flex items-center justify-between gap-1"><span className="text-[11px] font-bold">{s.label}</span>
-                  <button onClick={() => redo(s.key)} disabled={!!busy || st.redoLeft <= 0} className="text-[11px] underline cursor-pointer disabled:opacity-40">↻ Vẽ lại</button></div>
+                  <button onClick={() => redo(s.key)} disabled={!!busy || st.redoLeft <= 0} className="text-[11px] underline cursor-pointer disabled:opacity-40">{T('↻ Vẽ lại')}</button></div>
               </div>
             ))}
           </div>
         )}
-        <div className="mt-1 text-[11px] text-slate-400">Còn {st.redoLeft}/{MAX_REDO} lần vẽ lại cho bộ ảnh này.</div>
+        <div className="mt-1 text-[11px] text-slate-400">{T('Còn {a}/{b} lần vẽ lại cho bộ ảnh này.', { a: st.redoLeft, b: MAX_REDO })}</div>
       </div>
 
       {err && !busy && <div className="p-3 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-500 text-xs sm:text-sm">⚠️ {err}</div>}
-      <p className="text-[11px] text-slate-400">Ảnh AI minh họa ý tưởng. Hình khối bám theo 3D; chi tiết vật liệu, kích thước chính xác do kiến trúc sư chốt trong hồ sơ thiết kế.</p>
+      <p className="text-[11px] text-slate-400">{T('Ảnh AI minh họa ý tưởng. Hình khối bám theo 3D; chi tiết vật liệu, kích thước chính xác do kiến trúc sư chốt trong hồ sơ thiết kế.')}</p>
     </div>
   );
 }
