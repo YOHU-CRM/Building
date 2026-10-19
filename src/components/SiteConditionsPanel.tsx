@@ -58,6 +58,14 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
             <option value="cat">Đất cát / pha cát</option>
           </select>
         </div>
+        {dimsKindOf(ct) === 'nha' && (
+        <div className={`${box} col-span-2`}>
+          <label className={label}>Diện tích đất thực tế (m², không bắt buộc)</label>
+          <input className={input} inputMode="decimal" placeholder="vd: 500 — để trống nếu chưa cần tính mật độ"
+            value={ct.landAreaM2 ?? ''} onChange={e => set({ landAreaM2: e.target.value === '' ? undefined : e.target.value })} />
+          <div className="text-[11px] text-slate-400 mt-1">Chỉ dùng để tính mật độ xây dựng. Bản vẽ và dự toán luôn theo đúng kích thước nhà anh/chị nhập; sân vườn không tính trừ khi tích ô "Sân vườn".</div>
+        </div>
+        )}
         {dimsKindOf(ct) === 'dat' && <>
         <div className={box}>
           <label className={label}>Lùi trước (m)</label>
@@ -93,7 +101,7 @@ export const SiteConditionsPanel: React.FC<Props> = ({ theme, constructionInfo, 
       </div>
       <div className={`text-xs sm:text-sm leading-relaxed ${dark ? 'text-slate-300' : 'text-slate-700'}`}>
         <div>🏠 {site.note}</div>
-        {site.hasDims && !site.densityOk && (
+        {site.hasDims && site.densityKnown !== false && !site.densityOk && (
           <div className="text-rose-500 font-bold">⚠️ Mật độ xây dựng vượt mức khuyến nghị — nên tăng khoảng lùi (đối chiếu quy hoạch địa phương).</div>
         )}
         <div>🧱 Móng dự kiến: <b>{nm.foundation === 'coc' ? 'Móng cọc' : nm.foundation === 'be' ? 'Móng bè' : 'Móng băng'}</b> — {nm.reason}. Mái tính: <b>{{ ton: 'tôn', ngoi: 'ngói kèo thép', btct: 'bằng BTCT', thai_nhat: 'Thái/Nhật' }[roof]}</b>.</div>
