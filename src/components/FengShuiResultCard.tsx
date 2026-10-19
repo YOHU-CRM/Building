@@ -204,24 +204,42 @@ export const FengShuiResultCard: React.FC<FengShuiResultCardProps> = ({
         </div>
       )}
 
-      {/* MƯỢN TUỔI ĐỘNG THỔ (khi gia chủ phạm hạn) */}
-      {Array.isArray((fengShuiAnalysis as any).borrowAgeDetails) && (fengShuiAnalysis as any).borrowAgeDetails.length > 0 && /phạm/.test(String((fengShuiAnalysis as any).advice2026 || '')) && !/không phạm/.test(String((fengShuiAnalysis as any).advice2026 || '').slice(0, 200)) && (
-        <div className={`p-4 rounded-xl border text-xs sm:text-sm ${theme === 'dark' ? 'bg-slate-950/40 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-900'}`}>
-          <b className="text-sm sm:text-base">🤝 Tuổi có thể mượn để động thổ</b>
-          {!(fengShuiAnalysis as any).borrowAgeDetails.some((d: any) => d.tier !== 'luu_y') && (
-            <p className="mt-1 p-2 rounded-lg bg-amber-500/15 text-amber-600 font-bold">⚠️ Năm này không có tuổi mượn hoàn hảo cho gia đình. Các tuổi dưới đây dùng được nhưng có lưu ý — cân nhắc lùi năm khởi công (xem lời khuyên ở trên) hoặc hỏi thầy địa phương.</p>
-          )}
-          <ul className="mt-2 space-y-2">{(fengShuiAnalysis as any).borrowAgeDetails.map((d: any, i: number) => (
-            <li key={i} className={`p-2 rounded-lg border ${d.tier === 'luu_y' ? 'border-amber-500/40' : 'border-emerald-500/40'}`}>
-              <div><b>{d.year} {d.canChi}</b>{d.age ? ` · tuổi mụ ${d.age}` : ''} <span className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-black ${d.tier === 'luu_y' ? 'bg-amber-500/20 text-amber-600' : 'bg-emerald-500/20 text-emerald-600'}`}>{d.tier === 'luu_y' ? 'Dùng được – có lưu ý' : 'Tốt'}</span></div>
-              {Array.isArray(d.relations) && d.relations.length ? (
-                <ul className="mt-1 text-[12px] sm:text-xs space-y-0.5">{d.relations.map((r: any, k: number) => <li key={k}>– Với {r.label}: <b>{r.text}</b></li>)}</ul>
-              ) : <div className="text-[12px]">{d.why}</div>}
-            </li>
-          ))}</ul>
-          <p className="mt-2 opacity-80">Cách tool lọc: <b>loại hẳn</b> tuổi phạm Tam Tai / Kim Lâu / Hoang Ốc, tuổi xung, hình, hại với năm khởi công, tuổi xung hoặc hình với gia chủ, vợ/chồng. <b>Có lưu ý</b>: chỉ bán xung (cùng nhóm tứ hành xung) hoặc lục hại với gia đình.</p>
-        </div>
-      )}
+      {/* MƯỢN TUỔI ĐỘNG THỔ (khi gia chủ phạm hạn) — trọng tâm gia chủ, kèm vợ/chồng, luôn có cách làm */}
+      {(() => {
+        const fa: any = fengShuiAnalysis;
+        const adv = String(fa.advice2026 || '');
+        const list: any[] = Array.isArray(fa.borrowAgeDetails) ? fa.borrowAgeDetails : [];
+        const needBorrow = /^Kết luận:/.test(adv) || (/phạm/.test(adv) && !/không phạm/.test(adv.slice(0, 200)));
+        if (!needBorrow || !list.length) return null;
+        const conclusion = (adv.match(/^Kết luận:[^.]*\./) || [])[0];
+        const box = theme === 'dark' ? 'bg-slate-950/40 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-900';
+        return (
+          <div className={`p-4 rounded-xl border text-xs sm:text-sm ${box}`}>
+            <b className="text-sm sm:text-base">🤝 Mượn tuổi động thổ</b>
+            {conclusion && <p className="mt-1 p-2 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold">✅ {conclusion}</p>}
+            <p className="mt-2 opacity-90">Tool chọn tuổi theo <b>gia chủ</b> là chính: người được mượn phải không phạm hạn năm khởi công và không kỵ gia chủ; sau đó xét thêm tuổi <b>vợ/chồng</b> để báo rõ có hợp hay không.</p>
+            <ul className="mt-2 space-y-2">{list.map((d: any, i: number) => (
+              <li key={i} className={`p-2 rounded-lg border ${d.tier === 'luu_y' ? 'border-amber-500/40' : 'border-emerald-500/40'}`}>
+                <div><b>{d.year} {d.canChi}</b>{d.age ? ` · tuổi mụ ${d.age}` : ''} <span className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-black ${d.tier === 'luu_y' ? 'bg-amber-500/20 text-amber-600' : 'bg-emerald-500/20 text-emerald-600'}`}>{d.tier === 'luu_y' ? '🟡 Mượn được' : '✅ Nên mượn'}</span></div>
+                <div className="mt-1 text-[12px] sm:text-xs leading-relaxed">{d.plain || d.why}</div>
+                {d.remedy && <div className="mt-1 text-[12px] sm:text-xs text-amber-600 font-bold">👉 Cách xử lý: {d.remedy}</div>}
+                {d.note && <div className="mt-1 text-[11px] opacity-70">ℹ️ {d.note}</div>}
+              </li>
+            ))}</ul>
+            <div className="mt-3">
+              <b>Các bước làm lễ khi mượn tuổi</b>
+              <ol className="mt-1 list-decimal pl-5 space-y-0.5">
+                <li>Nhờ người được mượn tuổi (nam, khỏe mạnh, gia đình êm ấm, ưu tiên người thân) — chọn 1 người ở danh sách trên.</li>
+                <li>Đúng ngày giờ tool đề xuất, người đó đứng ra khấn và cuốc nhát đất đầu tiên.</li>
+                <li>Lúc đó gia chủ (và người có ghi "tránh mặt") tạm ra xa khu đất; xong lễ thì về bình thường.</li>
+                <li>Làm thủ tục "bán nhà" tượng trưng cho người mượn tuổi; đến lễ nhập trạch, gia chủ "mua lại" và về ở.</li>
+                <li>Khi đổ mái (cất nóc), nên nhờ lại chính người này đứng lễ.</li>
+              </ol>
+            </div>
+            <p className="mt-2 opacity-70 text-[11px]">Tuổi bị loại: phạm Tam Tai / Kim Lâu / Hoang Ốc năm khởi công, kỵ năm khởi công, hoặc kỵ thẳng với gia chủ, vợ/chồng. Nên nhờ thầy địa phương xem lại trước khi làm lễ.</p>
+          </div>
+        );
+      })()}
 
       {/* ĐÔNG / TÂY TỨ MỆNH & VỢ CHỒNG KHÁC NHÓM */}
       {((fengShuiAnalysis as any).menhQuaiExplain || ((fengShuiAnalysis as any).spouseAdvice || []).length > 0) && (
