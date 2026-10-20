@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { buildMassing, floorColor, MatKey, Prim } from '../lib/massingModel';
 import { tx } from '../lib/i18nExtra';
+import { resolveExteriorPalette, wantsSolar } from '../lib/exteriorPalette';
 
 /**
  * 3D HÌNH KHỐI — dựng từ chính mặt bằng 2D (cùng bộ lập mặt bằng), không gọi API, xoay được trên điện thoại.
@@ -31,6 +32,8 @@ interface Props {
   onVideoReady?: (url: string, ext: string) => void;
   /** bản xem thử (khách chưa mua gói Thiết kế): chỉ xoay xem, không tải / quay / chốt */
   preview?: boolean;
+  /** mô tả của gia chủ — lấy màu mái / tường / cửa và điện mặt trời áp mái */
+  description?: string;
 }
 
 export interface MassingShot { key: string; label: string; url: string }
@@ -65,7 +68,9 @@ const MAT_COLOR: Record<string, { c: string; o?: number; r?: number; m?: number 
   roof_ton: { c: '#4b6584', r: 0.5, m: 0.3 }, roof_ngoi: { c: '#b4532a', r: 0.85 }, roof_btct: { c: '#cfcac1', r: 0.9 }, roof_thai: { c: '#7a3b2e', r: 0.8 },
   ground: { c: '#9cc58a', r: 1 }, lot: { c: '#c9dfb6', r: 1 }, pond: { c: '#5aa9e6', o: 0.85, r: 0.15, m: 0.1 }, garden: { c: '#7fbf6a', r: 1 }, yard: { c: '#d9d4c7', r: 1 },
   porch: { c: '#c8b79e', r: 0.9 }, column: { c: '#efe9df', r: 0.8 }, railing: { c: '#64748b', o: 0.55, r: 0.4, m: 0.5 }, trunk: { c: '#7c5a3a', r: 1 }, leaf: { c: '#3f8f46', r: 1 },
-  stair: { c: '#9ca3af', r: 0.8 }, stone: { c: '#8d8a84', r: 1 }, outkitchen: { c: '#e7d3b8', r: 0.95 }, chimney: { c: '#7c6f64', r: 1 }, walkway_roof: { c: '#64748b', r: 0.6, m: 0.3 }
+  stair: { c: '#9ca3af', r: 0.8 }, stone: { c: '#8d8a84', r: 1 }, outkitchen: { c: '#e7d3b8', r: 0.95 }, chimney: { c: '#7c6f64', r: 1 }, walkway_roof: { c: '#64748b', r: 0.6, m: 0.3 },
+  frame: { c: '#6b7280', r: 0.45, m: 0.4 }, ridge: { c: '#4b5563', r: 0.5, m: 0.4 }, fascia: { c: '#f8fafc', r: 0.7 }, solar: { c: '#1e3a8a', r: 0.18, m: 0.65 },
+  paving: { c: '#cdc6b8', r: 0.95 }, shrub: { c: '#4d8b3f', r: 1 }
 };
 
 function parseDims(d?: string) {
@@ -117,7 +122,7 @@ function gableGeometry(p: Extract<Prim, { t: 'gable' }>) {
   return g;
 }
 
-export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, lang = 'vi', fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, customerName, onSnapshot, onLockMassing, lockedAt, onVideoReady, preview }: Props) {
+export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, lang = 'vi', fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, customerName, onSnapshot, onLockMassing, lockedAt, onVideoReady, preview, description }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const ctxRef = useRef<Ctx | null>(null);
   const [view, setView] = useState<number>(0);          // 0 = toàn nhà, k = xem tầng k (bóc mái & các tầng trên)
@@ -127,11 +132,13 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
   const { w, l } = parseDims(dimensions);
   const built = useMemo(() => {
     try {
-      return { model: buildMassing({ widthM: w, lengthM: l, totalFloors: Math.max(1, floors || 1), rooms, fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper }), error: null as string | null };
+      return { model: buildMassing({ widthM: w, lengthM: l, totalFloors: Math.max(1, floors || 1), rooms, fengShuiAnalysis, desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, solar: wantsSolar(description) }), error: null as string | null };
     } catch (e: any) { return { model: null, error: 'Chưa dựng được 3D: ' + String(e?.message || e) }; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [w, l, floors, JSON.stringify(rooms || {}), desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, JSON.stringify(fengShuiAnalysis?.favorableDirections || [])]);
+  }, [w, l, floors, JSON.stringify(rooms || {}), desiredDirection, frontSetbackM, backSetbackM, roofType, floorHeight1, floorHeightUpper, JSON.stringify(fengShuiAnalysis?.favorableDirections || []), wantsSolar(description)]);
   const model = built.model;
+  // Màu ngoại thất: mô tả của gia chủ → (không ghi) đề xuất theo bản mệnh → (chưa có tuổi) trung tính
+  const palette = useMemo(() => resolveExteriorPalette({ description, fengShuiAnalysis }), [description, fengShuiAnalysis?.element, (fengShuiAnalysis as any)?.hanh]);
   useEffect(() => { setErr(built.error); }, [built]);
 
   /* dựng cảnh */
@@ -151,12 +158,21 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     wrap.appendChild(renderer.domElement);
     renderer.domElement.style.touchAction = 'none';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(theme === 'dark' ? '#0f172a' : '#e8f1fb');
-    scene.fog = new THREE.Fog(scene.background as THREE.Color, 120, 260);
+    // bầu trời chuyển màu (sống động hơn nền phẳng)
+    {
+      const cv = document.createElement('canvas'); cv.width = 2; cv.height = 256;
+      const g2 = cv.getContext('2d')!; const gr = g2.createLinearGradient(0, 0, 0, 256);
+      gr.addColorStop(0, theme === 'dark' ? '#0b1224' : '#7fb3e6'); gr.addColorStop(0.6, theme === 'dark' ? '#1e293b' : '#cfe3f6'); gr.addColorStop(1, theme === 'dark' ? '#334155' : '#eef5fb');
+      g2.fillStyle = gr; g2.fillRect(0, 0, 2, 256);
+      const sky = new THREE.CanvasTexture(cv); sky.colorSpace = THREE.SRGBColorSpace; scene.background = sky;
+    }
+    scene.fog = new THREE.Fog(new THREE.Color(theme === 'dark' ? '#334155' : '#e6eff8'), 140, 300);
 
     const { x0, x1, z0, z1, yMax } = model.bbox;
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
@@ -194,7 +210,9 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
       let m: THREE.Material;
       if (k.startsWith('floor_')) m = new THREE.MeshStandardMaterial({ color: floorColor(k.slice(6)), roughness: 0.9 });
       else {
-        const d = MAT_COLOR[k] || { c: '#cccccc' };
+        const base = MAT_COLOR[k] || { c: '#cccccc' };
+        const over: Record<string, string> = { roof_ton: palette.roof.hex, roof_ngoi: palette.roof.hex, roof_thai: palette.roof.hex, wall_ext: palette.wall.hex, frame: palette.frame.hex, door_main: palette.door.hex, ridge: palette.roof.hex };
+        const d = over[k] ? { ...base, c: over[k] } : base;
         m = new THREE.MeshStandardMaterial({ color: d.c, roughness: d.r ?? 0.8, metalness: d.m ?? 0, transparent: d.o !== undefined, opacity: d.o ?? 1, side: k.startsWith('roof') || k === 'wall_ext' || k === 'walkway_roof' ? THREE.DoubleSide : THREE.FrontSide });
       }
       mats.set(k, m); return m;
@@ -213,6 +231,7 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
       let obj: THREE.Object3D | null = null;
       if (p.t === 'box') {
         const m = new THREE.Mesh(boxGeo, mat(p.mat)); m.scale.set(p.sx, p.sy, p.sz); m.position.set(p.x, p.y, p.z);
+        if (p.rx) m.rotation.x = p.rx; if (p.rz) m.rotation.z = p.rz;
         m.castShadow = p.mat !== 'glass' && p.tag !== 'site' && p.tag !== 'roomFloor'; m.receiveShadow = true; obj = m;
         if (p.tag === 'roomFloor') m.userData.roomFloor = true;
       } else if (p.t === 'gable') {
@@ -262,7 +281,7 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
       if (renderer.domElement.parentNode === wrap) wrap.removeChild(renderer.domElement);
       ctxRef.current = null;
     };
-  }, [model, theme]);
+  }, [model, theme, palette]);
 
   /* xem từng tầng: ẩn mái & các tầng trên, hiện tên phòng của tầng đang xem */
   useEffect(() => {
@@ -421,6 +440,12 @@ export default function Massing3DViewer({ dimensions, floors = 1, rooms, theme, 
         <div>
           <h4 className="text-sm sm:text-base font-black uppercase tracking-tight">🧊 {T('3D Hình Khối — dựng từ mặt bằng')}</h4>
           <p className="text-xs text-slate-400">{model ? model.summary.join(' · ') : ''}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+            {([['Mái', palette.roof], ['Tường', palette.wall], ['Khung cửa', palette.frame], ['Cửa chính', palette.door]] as const).map(([k, it]) => (
+              <span key={k} className="inline-flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm border border-slate-300" style={{ background: it.hex }} />{k}: <b>{it.name}</b> <i className="opacity-70">({it.source === 'mo_ta' ? 'theo mô tả' : it.source === 'phong_thuy' ? `đề xuất theo mệnh ${palette.element}` : 'tạm, chưa chọn'})</i></span>
+            ))}
+          </div>
+          {palette.notes.length > 0 && <p className="mt-0.5 text-[11px] text-slate-500 leading-snug">{palette.notes.join(' ')}</p>}
         </div>
         {!preview && <div className="flex flex-wrap gap-2">
           {onLockMassing && <button onClick={lockMassing} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-md min-h-[40px] cursor-pointer">{T(lockMsg ? '✓ Đã chốt' : lockedAt ? '🔒 Chốt lại hình khối' : '✅ Chốt hình khối (5 góc)')}</button>}
