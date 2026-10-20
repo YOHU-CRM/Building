@@ -76,6 +76,7 @@ import RoomRequirementsPanel from "./components/RoomRequirementsPanel";
 const AdminDesignManager = React.lazy(() => import("./components/AdminDesignManager"));
 import CustomerResultsCard, { PerspectiveShot } from "./components/CustomerResultsCard";
 import { computeSiteFor, setbacksFor, roomsFor, planDimsFor } from "./lib/siteGeometry";
+import { resolveExteriorPalette, wantsSolar } from './lib/exteriorPalette';
 // 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
 const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
 const ElevationViewer = React.lazy(() => import("./components/ElevationViewer"));
@@ -2099,6 +2100,8 @@ export default function App() {
       `Kích thước nhà xây: rộng ${site.lotWidthM}m (mặt tiền), sâu ${site.houseLengthM}m; diện tích xây dựng ${site.footprint}m²`,
       `Hướng mặt tiền: ${userInfo?.desiredDirection || 'chưa rõ'}`,
       `Mái: ${ct.loai_mai || 'theo loại công trình'}`,
+      (() => { const pl = resolveExteriorPalette({ description: ct.overallDescription, fengShuiAnalysis }); const src = (x: any) => x.source === 'mo_ta' ? 'gia chủ ghi' : x.source === 'phong_thuy' ? `đề xuất theo mệnh ${pl.element}` : 'trung tính'; return `MÀU NGOẠI THẤT (bắt buộc giữ đúng): mái ${pl.roof.name} (${src(pl.roof)}), tường ${pl.wall.name} (${src(pl.wall)}), khung cửa sổ ${pl.frame.name} (${src(pl.frame)}), cửa chính ${pl.door.name} (${src(pl.door)})`; })(),
+      wantsSolar(ct.overallDescription) ? 'Có hệ pin điện mặt trời áp mái trên mặt mái hướng Nam' : '',
       `Kết cấu: ${ct.loai_ket_cau_chinh || 'BTCT'}`,
       ct.loai_tran ? `Trần: ${ct.loai_tran}` : '',
       `Phòng ngủ: ${ct.rooms?.bedroomCount || 'theo thiết kế'}; WC: ${ct.rooms?.bathroomCount || 'theo thiết kế'}; phòng thờ: ${ct.rooms?.worshipRoom ? 'có' : 'không'}`,
@@ -4317,6 +4320,7 @@ ${goi === 'design' ? `
                               {activeDrawingTab === 'massing' ? (
                                 <React.Suspense fallback={<div className="mt-6 p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
                                   <Massing3DViewer
+                                    description={constructionInfo.overallDescription}
                                     dimensions={planDimsFor(constructionInfo)}
                                     floors={parseInt(constructionInfo.floors) || 2}
                                     rooms={roomsFor(constructionInfo)}
@@ -4765,7 +4769,7 @@ ${goi === 'design' ? `
                       <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'bg-[#121829]/50 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                         <div className="text-sm font-extrabold mb-1">🏠 3D ngôi nhà của anh/chị (dựng từ mặt bằng)</div>
                         <React.Suspense fallback={<div className="p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
-                          <Massing3DViewer dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
+                          <Massing3DViewer description={constructionInfo.overallDescription} dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
                             customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
                             frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
                             roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} floorHeight1={(constructionInfo as any).floorHeight1} floorHeightUpper={(constructionInfo as any).floorHeightUpper} onSnapshot={(url) => setMassingSnapshot(url)}
@@ -4776,7 +4780,7 @@ ${goi === 'design' ? `
                       <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'bg-[#121829]/50 border-purple-500/30' : 'bg-purple-50/50 border-purple-200'}`}>
                         <div className="text-sm font-extrabold mb-1">🏠 Xem thử 3D ngôi nhà của anh/chị</div>
                         <React.Suspense fallback={<div className="p-6 text-center text-sm text-slate-400">Đang dựng mô hình 3D…</div>}>
-                          <Massing3DViewer preview dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
+                          <Massing3DViewer preview description={constructionInfo.overallDescription} dimensions={planDimsFor(constructionInfo)} floors={parseInt(constructionInfo.floors) || 2} rooms={roomsFor(constructionInfo)} theme={theme} lang={lang}
                             customerName={userInfo?.name || "Khách Hàng"} fengShuiAnalysis={fengShuiAnalysis} desiredDirection={userInfo?.desiredDirection}
                             frontSetbackM={setbacksFor(constructionInfo).front} backSetbackM={setbacksFor(constructionInfo).back}
                             roofType={(constructionInfo as any).loai_mai || constructionInfo.constructionType} floorHeight1={(constructionInfo as any).floorHeight1} floorHeightUpper={(constructionInfo as any).floorHeightUpper} />
