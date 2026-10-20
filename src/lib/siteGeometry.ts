@@ -167,7 +167,16 @@ export function computeSiteFor(ct: any): SiteGeometry {
         hasDims: true, lotWidthM: r1(lotW), lotLengthM: r1(lotL), lotArea: land || lotArea,
         frontSetbackM: p.frontSetbackM, backSetbackM: p.backSetbackM,
         houseLengthM: p.houseLengthM, footprint, densityPct: d.densityPct, maxDensityPct: d.maxDensityPct, densityOk: d.densityOk, densityKnown: d.densityKnown, landAreaM2: d.landAreaM2,
-        note: `Vẽ theo phác thảo: nhà ${p.widthM}×${p.houseLengthM}m, diện tích xây dựng ${footprint}m² (không tính hiên) — đúng số đo gia chủ nhập. Phần quanh nhà trên bản vẽ chỉ là khu vực ngoài nhà minh họa (hiên, lối đi, hạng mục gia chủ yêu cầu), không phải ranh đất. ${d.text}`
+        note: (() => {
+          // MỘT con số diện tích xây dựng dùng cho mọi nơi (bản vẽ, 3D, dự toán, PDF, CRM) = diện tích nhà trên mặt bằng tool vẽ
+          const dimsA = base0.footprint, extra = r1(footprint - dimsA);
+          const head = extra > 1
+            ? `Diện tích xây dựng ${footprint}m² = khối chính ${base0.lotWidthM}×${base0.houseLengthM}m (${dimsA}m², số đo gia chủ nhập) + phần nhô ra theo phác thảo ${extra}m² (không tính hiên). Nếu anh/chị muốn xây đúng ${dimsA}m², sửa phác thảo / yêu cầu từng phòng để dồn phần nhô vào trong — dự toán tự tính lại.`
+            : extra < -1
+              ? `Diện tích xây dựng ${footprint}m² theo mặt bằng (nhỏ hơn số đo nhập ${dimsA}m² vì phác thảo có sân / hiên trong khối nhà).`
+              : `Diện tích xây dựng ${footprint}m² = ${p.widthM}×${p.houseLengthM}m đúng số đo gia chủ nhập (không tính hiên).`;
+          return `${head} Phần quanh nhà trên bản vẽ chỉ là khu vực ngoài nhà minh họa, không phải ranh đất. ${d.text}`;
+        })()
       };
     }
     const pct = Math.round(footprint / lotArea * 100);

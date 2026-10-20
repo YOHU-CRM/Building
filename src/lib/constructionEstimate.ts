@@ -6,12 +6,17 @@
 
 import { ConstructionInfo, AIResultReport } from '../types';
 import { StructuralOptionKey } from './boqEngine';
-import { getUnifiedEstimate, parsePricingArea, resolveOptionKey } from './unifiedPricing';
+import { getUnifiedEstimate, parsePricingArea, resolveOptionKey, priceMethods, PriceMethod } from './unifiedPricing';
 
 export interface ComprehensiveEstimate {
   areaPerFloor: number;
   floors: number;
-  totalFloorArea: number;       // Tổng diện tích sàn thi công tính cả móng và mái
+  totalFloorArea: number;       // Diện tích QUY ĐỔI (móng + sàn + mái + hiên × hệ số) — cách nhà thầu báo giá
+  usableArea: number;           // Diện tích SÀN SỬ DỤNG (các sàn có mái che, theo mặt bằng từng tầng)
+  ratePerUsable: number;        // tổng ÷ m² sàn sử dụng
+  ratePerConverted: number;     // tổng ÷ m² quy đổi
+  quyDoiDetail: { label: string; area: number; pct: number; converted: number }[];
+  methods: PriceMethod[];       // 3 cách tính giá theo m² (sàn sử dụng / quy đổi / khoán m² xây dựng)
   selectedOptionKey: 'PA1' | 'PA2' | 'PA3';
   selectedOption: { title: string; codeName: string; pricePerSqm: number; totalCost: number; desc: string };
   packageOptions: {
@@ -226,7 +231,7 @@ export function generateComprehensiveEstimate(
   // 6. Khuyến nghị chuyên gia & Giải thích diện tích sàn
   const coefUsed = (Math.round((totalFloorArea / area) * 100) / 100);
   const expertRecommendations = [
-    `📐 DIỆN TÍCH: ${site.note} Sàn thực ${masterEstimate.dien_tich_san}m² (${area}m² × ${floors} tầng). Quy đổi theo cách nhà thầu báo giá: sàn + móng ${masterEstimate.he_so_quy_doi.mong} + mái ${masterEstimate.he_so_quy_doi.mai} = ${totalFloorArea}m² (hệ số ${coefUsed}) — dùng để so sánh đơn giá/m² với báo giá khác.`,
+    `📐 DIỆN TÍCH & GIÁ THEO m²: ${site.note} Sàn sử dụng ${masterEstimate.dien_tich_san}m² → ${fmtVND(masterEstimate.suat_san_su_dung_m2)}/m² sàn sử dụng. Quy đổi theo cách nhà thầu báo giá: ${masterEstimate.quy_doi_chi_tiet.map(l => `${l.label} ${l.area}m² × ${l.pct}%`).join(' + ')} = ${totalFloorArea}m² (hệ số ${coefUsed}) → ${fmtVND(masterEstimate.suat_dau_tu_m2)}/m² quy đổi. Hai cách cùng một tổng dự toán, dùng để so với báo giá khác. ${(() => { const m3 = priceMethods(masterEstimate)[2]; return m3.applicable ? `Cách 3 – khoán theo m² xây dựng: ${m3.area}m² × ${fmtVND(m3.rate)} = ${fmtVND(m3.total)} (${m3.source === 'cong_ty' ? 'đơn giá khoán công ty' : 'chưa có đơn giá khoán công ty, tạm suy từ bóc tách'}; chỉ áp dụng nhà 1 tầng móng băng, chưa gồm ép cọc / gia cố nền, sân, tường rào).` : `Cách 3 – khoán theo m² xây dựng: ${m3.note}`; })()}`,
     `⚖️ TỔNG DỰ TOÁN phương án đã chọn: ${fmtVND(masterEstimate.tong_tron_goi)} (${masterEstimate.formatted_suat_dau_tu_m2}), chưa gồm: VAT, chi phí xin phép xây dựng, thiết kế, khảo sát địa chất, ép cọc (nếu địa chất yếu), phá dỡ nhà cũ, nội thất rời. Sai số dự toán sơ bộ ±10–15%.`,
     `🛡️ VẬT TƯ: Chủng loại & thương hiệu ghi trong bảng là đề xuất theo gói; hợp đồng thi công cần ghi rõ mã sản phẩm để gia chủ nghiệm thu.`,
     isEpsMonolithic
@@ -265,6 +270,11 @@ export function generateComprehensiveEstimate(
     selectedOption,
     floors,
     totalFloorArea,
+    usableArea: masterEstimate.dien_tich_san,
+    ratePerUsable: masterEstimate.suat_san_su_dung_m2,
+    ratePerConverted: masterEstimate.suat_dau_tu_m2,
+    quyDoiDetail: masterEstimate.quy_doi_chi_tiet,
+    methods: priceMethods(masterEstimate),
     packageOptions,
     structuralSolution: {
       foundation: foundationStr,

@@ -12,9 +12,10 @@ import {
   StructuralOptionKey,
   FinishingPackageKey
 } from './boqEngine.js';
-import { computeSiteFor, SiteGeometry } from './siteGeometry.js';
+import { computeSiteFor, SiteGeometry, roomsFor, planDimsFor, setbacksFor } from './siteGeometry.js';
+import { hasFreeSketch, planFreeLayout } from './sketchFreePlanner.js';
 
-export const PRICING_VERSION = '2026.10b';
+export const PRICING_VERSION = '2026.10c';
 
 export interface PricingInput {
   constructionInfo?: any;
@@ -75,7 +76,26 @@ export function getUnifiedEstimate(input: PricingInput): FullProjectEstimateResu
   const site = computeSiteFor(ct);
   const floors = Math.max(1, Math.min(50, Math.round(Number(ct.floors) || 1)));
   const address = resolveAddress(ct, input.userInfo);
+  // Sàn sử dụng từng tầng + hiên có mái lấy từ CHÍNH mặt bằng tool vẽ (vẽ theo phác thảo / yêu cầu từng phòng):
+  // phần nhô chỉ ở tầng 1, tầng trên nhỏ hơn… → dự toán khớp bản vẽ. Nhà ống tự động: diện tích xây dựng × số tầng.
+  const planAreas = (() => {
+    try {
+      const rooms = roomsFor(ct);
+      if (!hasFreeSketch(rooms, 1, floors)) return null;
+      const pd = planDimsFor(ct).toLowerCase().match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/);
+      const sb = setbacksFor(ct);
+      const san: number[] = []; let hien = 0;
+      for (let f = 1; f <= floors; f++) {
+        const p = planFreeLayout({ widthM: pd ? parseFloat(pd[1]) : site.lotWidthM, lengthM: pd ? parseFloat(pd[2]) : site.lotLengthM, floor: f, totalFloors: floors, rooms, desiredDirection: ct?.desiredDirection, frontSetbackM: sb.front, backSetbackM: sb.back });
+        san.push(Math.round(p.rooms.filter(r => !r.outside && !r.open).reduce((n, r) => n + r.w * r.h, 0) * 10) / 10);
+        hien += p.rooms.filter(r => (r.outside && r.type === 'porch' && r.roofed) || r.type === 'balcony').reduce((n, r) => n + r.w * r.h, 0);
+      }
+      return san.every(v => v > 5) ? { san, hien: Math.round(hien * 10) / 10 } : null;
+    } catch { return null; }
+  })();
   const est = calculateMasterProjectEstimate({
+    san_tang: planAreas?.san,
+    dien_tich_hien: planAreas?.hien,
     optionKey: input.optionKey || resolveOptionKey(ct.loai_ket_cau_chinh),
     packageKey: input.packageKey || resolvePackageKey(ct.finishingPackage),
     dien_tich_xay_dung: site.footprint,
@@ -99,6 +119,47 @@ export function getUnifiedEstimate(input: PricingInput): FullProjectEstimateResu
     }
   });
   return Object.assign(est, { meta: { version: PRICING_VERSION, areaInput: site.footprint, widthM: site.lotWidthM, lengthM: site.lotLengthM, address, site }, yeuCauGiaChu: summarizeChoices(ct, est) });
+}
+
+/* ══ 3 CÁCH TÍNH GIÁ THEO m² — cùng 1 bộ số liệu diện tích (lấy từ mặt bằng tool vẽ) ══
+ * Cách 1: m² SÀN SỬ DỤNG × đơn giá/m² sàn sử dụng      (cách người dân hay hiểu; Bộ XD công bố suất vốn theo cách này)
+ * Cách 2: m² QUY ĐỔI (móng, sàn, mái, hiên × hệ số) × đơn giá/m² quy đổi   (cách nhà thầu tư nhân báo giá)
+ * Cách 3: m² XÂY DỰNG (phần nhà chiếm đất) × đơn giá KHOÁN của công ty   — CHỈ nhà 1 tầng, móng băng nền thường
+ * Cách 1 và 2 cùng 1 tổng (bóc tách khối lượng). Cách 3 là giá khoán gọn do công ty đặt trong Admin → có thể khác.
+ */
+export type DonGiaKhoan = Partial<Record<FinishingPackageKey, number>>;   // đ/m² xây dựng, 0 = chưa đặt
+let DON_GIA_KHOAN: DonGiaKhoan = {};
+export function setDonGiaKhoan(o: any) {
+  const n: DonGiaKhoan = {};
+  (['tiet_kiem', 'tieu_chuan', 'cao_cap'] as FinishingPackageKey[]).forEach(k => { const v = Number(o?.[k]); if (isFinite(v) && v >= 0 && v <= 100000000) n[k] = Math.round(v); });
+  DON_GIA_KHOAN = n;
+}
+export const getDonGiaKhoan = (): DonGiaKhoan => ({ ...DON_GIA_KHOAN });
+
+export interface PriceMethod { key: 'su_dung' | 'quy_doi' | 'xay_dung'; title: string; area: number; areaLabel: string; rate: number; total: number; applicable: boolean; note: string; source?: 'boc_tach' | 'cong_ty' }
+export function priceMethods(est: FullProjectEstimateResult & { meta?: any }): PriceMethod[] {
+  const total = est.tong_tron_goi;
+  const m1: PriceMethod = {
+    key: 'su_dung', title: 'Cách 1 · Theo m² sàn sử dụng', area: est.dien_tich_san, areaLabel: 'm² sàn sử dụng', rate: est.suat_san_su_dung_m2, total, applicable: true, source: 'boc_tach',
+    note: 'Diện tích các phòng, hành lang có mái che mà gia đình ở được, cộng tất cả các tầng (lấy từ mặt bằng). Đơn giá = tổng dự toán bóc tách ÷ m² sàn sử dụng. Đây là cách người dân hay tính.'
+  };
+  const m2: PriceMethod = {
+    key: 'quy_doi', title: 'Cách 2 · Theo m² quy đổi', area: est.dien_tich_quy_doi, areaLabel: 'm² quy đổi', rate: est.suat_dau_tu_m2, total, applicable: true, source: 'boc_tach',
+    note: `Nhà thầu cộng thêm ${est.quy_doi_chi_tiet.filter(l => l.pct !== 100).map(l => `${l.label.toLowerCase()} ${l.pct}%`).join(', ')} vào diện tích, nên số m² lớn hơn, đơn giá nhỏ hơn — CÙNG tổng tiền với cách 1. Khi so báo giá: đơn giá nhà thầu báo thường là đơn giá quy đổi, KHÔNG nhân với m² sử dụng.`
+  };
+  // Cách 3: chỉ nhà 1 tầng, móng băng (nền thường) — nhà nhiều tầng / móng cọc / móng bè: khối lượng không tỷ lệ theo m² → dễ lỗ
+  const simple = est.so_tang === 1 && est.nen_mong.foundation === 'bang';
+  const why = est.so_tang > 1 ? `nhà ${est.so_tang} tầng` : est.nen_mong.foundation === 'coc' ? 'móng cọc (đất yếu)' : est.nen_mong.foundation === 'be' ? 'móng bè' : '';
+  const dg = DON_GIA_KHOAN[est.packageKey] || 0;
+  const fp = est.dien_tich_xay_dung;
+  const rate3 = dg > 0 ? dg : Math.round(total / Math.max(1, fp));
+  const m3: PriceMethod = {
+    key: 'xay_dung', title: 'Cách 3 · Khoán theo m² xây dựng', area: fp, areaLabel: 'm² xây dựng', rate: simple ? rate3 : 0, total: simple ? (dg > 0 ? Math.round(fp * dg) : total) : 0, applicable: simple, source: dg > 0 ? 'cong_ty' : 'boc_tach',
+    note: simple
+      ? `${fp} m² phần nhà chiếm đất (không tính hiên, sân) × ${dg > 0 ? 'đơn giá khoán của công ty' : 'đơn giá suy từ bóc tách (công ty chưa đặt đơn giá khoán trong Admin)'}. CHỈ áp dụng nhà 1 tầng, móng băng trên nền đất thường. Chưa gồm: ép cọc / gia cố nền nếu khảo sát ra đất yếu, sân, tường rào, hạng mục báo giá riêng.${est.nen_mong.soil === 'chua_biet' ? ' Chưa biết loại đất — giá khoán chỉ giữ nếu khảo sát ra đất tốt.' : ''}`
+      : `Không áp dụng cho ${why}: khối lượng móng, kết cấu, mái tăng không theo tỷ lệ m² nên khoán theo m² dễ lỗ. Dùng cách 1 hoặc 2.`
+  };
+  return [m1, m2, m3];
 }
 
 /** Bảng "Yêu cầu của gia chủ đã đưa vào dự toán" — từng lựa chọn: dòng nào nhận, có đổi tiền không */
@@ -192,6 +253,9 @@ export function applyUnifiedPricing<T extends Record<string, any>>(report: T, in
     areaInput: est.meta.areaInput,
     floorAreaConverted: est.dien_tich_quy_doi,
     floorAreaReal: est.dien_tich_san,
+    perM2Usable: est.suat_san_su_dung_m2,       // giá / m² sàn sử dụng
+    methods: priceMethods(est),                 // 3 cách tính giá theo m²
+    quyDoiDetail: est.quy_doi_chi_tiet,         // bảng tính diện tích quy đổi
     footprint: est.dien_tich_xay_dung,
     siteNote: est.meta.site.note,
     foundation: est.nen_mong.reason,
