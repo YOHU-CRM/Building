@@ -124,6 +124,7 @@ export function planDimsFor(ct: any): string {
 
 /** Diện tích đất thật gia chủ nhập (m²) — chỉ dùng khi số đo là kích thước NHÀ */
 export function landAreaOf(ct: any): number | undefined {
+  if (dimsKindOf(ct) !== 'nha') return undefined;      // ô chỉ hiện khi số đo là kích thước nhà — ẩn thì không dùng
   const v = num(ct?.landAreaM2);
   return v && v > 0 ? r1(v) : undefined;
 }
