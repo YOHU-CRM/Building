@@ -7,7 +7,8 @@ import multer from "multer";
 import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import { calculateFengShui, getLunarBirthYear, getDefaultConstructionYear, getCanChi } from "./src/lib/fengshui.js";
-import { applyUnifiedPricing } from "./src/lib/unifiedPricing.js";
+import { applyUnifiedPricing, getUnifiedEstimate, setDonGiaKhoan, getDonGiaKhoan, priceMethods } from "./src/lib/unifiedPricing.js";
+import { DEFAULT_QUY_DOI, setQuyDoiCoefficients, getQuyDoiCoefficients } from "./src/lib/boqEngine.js";
 
 dotenv.config();
 
@@ -602,6 +603,22 @@ async function notifyGoogleSheets(lead: any) {
 
     totalBudget: lead.constructionInfo?.totalBudget || "",
     "Ngân sách (Số)": lead.constructionInfo?.totalBudget || "",
+    ...(() => {
+      // Dự toán chuẩn (cùng bộ tính với màn hình & PDF) — 2 cách tính giá theo m²
+      try {
+        if (!lead.constructionInfo?.dimensions) return {};
+        const e: any = getUnifiedEstimate({ constructionInfo: lead.constructionInfo, userInfo: lead.userInfo });
+        return {
+          "Tổng dự toán (đ)": e.tong_tron_goi,
+          "Sàn sử dụng (m²)": e.dien_tich_san,
+          "Đơn giá / m² sàn sử dụng": e.suat_san_su_dung_m2,
+          "Diện tích quy đổi (m²)": e.dien_tich_quy_doi,
+          "Đơn giá / m² quy đổi": e.suat_dau_tu_m2,
+          "Cách tính quy đổi": (e.quy_doi_chi_tiet || []).map((l: any) => `${l.label} ${l.area}m²×${l.pct}%`).join(" + "),
+          ...(() => { const m3 = priceMethods(e)[2]; return { "Diện tích xây dựng (m²)": e.dien_tich_xay_dung, "Cách 3 khoán m² XD (đ)": m3.applicable ? m3.total : "Không áp dụng", "Đơn giá khoán / m² XD": m3.applicable ? m3.rate : "" }; })()
+        };
+      } catch { return {}; }
+    })(),
 
     dimensions: lead.constructionInfo?.dimensions || "",
     "Kích Thước": lead.constructionInfo?.dimensions || "",
@@ -1289,7 +1306,9 @@ const DEFAULT_APP_SETTINGS = {
   ctvCommissionEnabled: false, // máy chủ tự ghi sổ hoa hồng CTV khi admin xác nhận đã thu tiền (chỉ ghi sổ, KHÔNG chuyển tiền)
   renderLimitPerClient: 15,    // số lượt AI vẽ ảnh phối cảnh tối đa / khách (bảo vệ tín dụng API)
   aiLimitPerHour: 40,          // số lần gọi AI tối đa / 1 máy (IP) / giờ — 0 = không giới hạn
-  aiLimitPerDay: 150           // số lần gọi AI tối đa / 1 máy (IP) / ngày
+  aiLimitPerDay: 150,          // số lần gọi AI tối đa / 1 máy (IP) / ngày
+  quyDoi: { ...DEFAULT_QUY_DOI } as Record<string, number>,  // hệ số diện tích quy đổi (%) — móng, mái, hiên
+  donGiaKhoan: {} as Record<string, number>                   // đơn giá KHOÁN đ/m² xây dựng theo gói (cách 3: nhà 1 tầng móng băng) — 0 = chưa đặt
 };
 const NUMERIC_SETTINGS = new Set(["renderLimitPerClient", "aiLimitPerHour", "aiLimitPerDay"]);
 let appSettingsCache: typeof DEFAULT_APP_SETTINGS | null = null;
@@ -1302,6 +1321,8 @@ async function getAppSettings() {
       if (doc?.exists) s = { ...s, ...(doc.data() || {}) };
     }
   } catch (e: any) { console.warn("[settings] read:", e?.message || e); }
+  setQuyDoiCoefficients(s.quyDoi as any); s.quyDoi = getQuyDoiCoefficients() as any;   // máy chủ tính giá cùng hệ số
+  setDonGiaKhoan(s.donGiaKhoan); s.donGiaKhoan = getDonGiaKhoan() as any;
   appSettingsCache = s;
   return s;
 }
@@ -1315,6 +1336,8 @@ app.post("/api/admin/settings", adminAuthMiddleware, async (req, res) => {
   (Object.keys(DEFAULT_APP_SETTINGS) as (keyof typeof DEFAULT_APP_SETTINGS)[]).forEach(k => {
     const v = req.body?.[k];
     if (NUMERIC_SETTINGS.has(k)) { const n = Number(v); if (v !== undefined && isFinite(n)) (next as any)[k] = Math.max(0, Math.min(500, Math.round(n))); }
+    else if (k === "donGiaKhoan") { if (v && typeof v === "object") { setDonGiaKhoan({ ...(cur.donGiaKhoan || {}), ...v }); next.donGiaKhoan = getDonGiaKhoan() as any; } }
+    else if (k === "quyDoi") { if (v && typeof v === "object") { setQuyDoiCoefficients({ ...(cur.quyDoi || {}), ...v }); next.quyDoi = getQuyDoiCoefficients() as any; } }
     else if (typeof v === "boolean") (next as any)[k] = v;
   });
   appSettingsCache = next;
@@ -1557,6 +1580,8 @@ app.get("/api/config", async (req, res) => {
     serverImageStorage: st.serverImageStorage,
     ctvCommissionEnabled: st.ctvCommissionEnabled,
     renderLimitPerClient: st.renderLimitPerClient,
+    quyDoi: st.quyDoi,
+    donGiaKhoan: st.donGiaKhoan,
     company: {
       name: (process.env.COMPANY_NAME || "").trim(), address: (process.env.COMPANY_ADDRESS || "").trim(),
       email: (process.env.COMPANY_EMAIL || "").trim(), taxCode: (process.env.COMPANY_TAX_CODE || "").trim()
