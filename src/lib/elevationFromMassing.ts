@@ -38,7 +38,8 @@ const STYLE: Record<string, { f: string; s?: string; op?: number; opaque?: boole
   roof_ton: { f: '#b7c6d6', opaque: true, hatch: 'v' }, roof_ngoi: { f: '#e2a07c', opaque: true, hatch: 'h' }, roof_btct: { f: '#e5e7eb', opaque: true }, roof_thai: { f: '#b9695b', opaque: true, hatch: 'h' },
   porch: { f: '#ece9e4', opaque: true }, column: { f: '#ffffff', opaque: true }, railing: { f: '#e2e8f0', s: '#475569', op: 0.35 },
   trunk: { f: '#a8a29e' }, leaf: { f: '#dcfce7', s: '#16a34a', op: 0.85 }, stair: { f: '#e5e7eb', opaque: true }, stone: { f: '#d6d3d1', opaque: true },
-  outkitchen: { f: '#fef3c7', opaque: true }, chimney: { f: '#a8a29e', opaque: true }, walkway_roof: { f: '#cbd5e1', opaque: true }
+  outkitchen: { f: '#fef3c7', opaque: true }, chimney: { f: '#a8a29e', opaque: true }, walkway_roof: { f: '#cbd5e1', opaque: true },
+  frame: { f: '#475569', opaque: true }, ridge: { f: '#94a3b8', opaque: true }, fascia: { f: '#ffffff', opaque: true }, solar: { f: '#1e3a8a', s: '#0f172a', opaque: true }, paving: { f: '#e7e5e4' }, shrub: { f: '#dcfce7', s: '#16a34a', op: 0.85 }
 };
 const CUT_FILL = '#475569';
 
@@ -60,7 +61,13 @@ function project(p: Prim, view: ElevView, xc: number): Shape[] {
   };
   // khung bao 3D của khối
   let x0: number, x1: number, z0: number, z1: number, y0: number, y1: number;
-  if (p.t === 'box') { x0 = p.x - p.sx / 2; x1 = p.x + p.sx / 2; z0 = p.z - p.sz / 2; z1 = p.z + p.sz / 2; y0 = p.y - p.sy / 2; y1 = p.y + p.sy / 2; if (p.tag === 'site' && p.sy < 0.13 && y1 < 0.2) return []; }
+  if (p.t === 'box') {
+    // khối xoay (mái hiên dốc, tấm pin trên mái): khung bao theo góc xoay
+    const cx = Math.cos(p.rx || 0), sx = Math.abs(Math.sin(p.rx || 0)), cz = Math.cos(p.rz || 0), sz = Math.abs(Math.sin(p.rz || 0));
+    const hy = (p.sy * cx * cz + p.sz * sx + p.sx * sz) / 2, hz = (p.sz * cx + p.sy * sx) / 2, hx = (p.sx * cz + p.sy * sz) / 2;
+    x0 = p.x - hx; x1 = p.x + hx; z0 = p.z - hz; z1 = p.z + hz; y0 = p.y - hy; y1 = p.y + hy;
+    if (p.tag === 'site' && p.sy < 0.13 && y1 < 0.2) return [];
+  }
   else if (p.t === 'cyl') { x0 = p.x - p.r; x1 = p.x + p.r; z0 = p.z - p.r; z1 = p.z + p.r; y0 = p.y - p.h / 2; y1 = p.y + p.h / 2; }
   else if (p.t === 'sphere') { x0 = p.x - p.r; x1 = p.x + p.r; z0 = p.z - p.r; z1 = p.z + p.r; y0 = p.y - p.r * 0.85; y1 = p.y + p.r * 0.85; }
   else { x0 = Math.min(p.x0, p.x1); x1 = Math.max(p.x0, p.x1); z0 = Math.min(p.z0, p.z1); z1 = Math.max(p.z0, p.z1); y0 = p.y; y1 = p.y + p.rise; }
@@ -141,7 +148,9 @@ export function buildElevation(model: MassingModel, view: ElevView, opts: { cust
       const yc = (s.bb.y0 + s.bb.y1) / 2;
       let f = 1; for (let k = 1; k <= model.floors; k++) if (model.floorBase[k] <= yc + 0.01) f = k;
       const b0 = model.floorBase[f], b1 = model.floorBase[f + 1];
-      return Math.max(-1e9, ...ext.filter(e => e.bb.u0 < s.bb.u1 - 0.01 && e.bb.u1 > s.bb.u0 + 0.01 && e.bb.y0 < b1 - 0.05 && e.bb.y1 > b0 + 0.05).map(e => e.near));
+      // chỉ xét tường ngoài che đúng vị trí giữa khối (nhà chữ L: tường hông phần nhô không được "che" mặt tiền khối chính)
+      const uc = (s.bb.u0 + s.bb.u1) / 2;
+      return Math.max(-1e9, ...ext.filter(e => e.bb.u0 < uc - 0.01 && e.bb.u1 > uc + 0.01 && e.bb.y0 < b1 - 0.05 && e.bb.y1 > b0 + 0.05).map(e => e.near));
     };
     shapes = shapes.filter(s => !(s.mat && DEEP.has(s.mat) && (s.bb.y0 + s.bb.y1) / 2 < topY - 0.05 && s.near < front(s) - 0.4));
     // nền tối sau lỗ cửa: theo từng tầng, phủ trong khung tường ngoài

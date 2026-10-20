@@ -45,6 +45,7 @@ export interface PlanRoom {
   x: number; y: number; w: number; h: number;
   outside?: boolean;          // ngoài nhà (sân, ban công)
   open?: boolean;             // thông tầng / không mái (giếng trời, sân thượng)
+  roofed?: boolean;           // ngoài nhà nhưng có mái (mái hiên trước cửa) — false = sân trống
   doors: PlanDoor[];
   windows: Side[];
   items: PlanItem[];

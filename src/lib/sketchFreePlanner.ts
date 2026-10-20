@@ -210,13 +210,15 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
 
   /* ── Đối chiếu ô nhập / mô tả của gia chủ với bản vẽ tay: KHÔNG tự thêm bớt phòng, ghi câu hỏi để gia chủ xác nhận ── */
   const ui = input.rooms || {};
-  const cnt = (l: string) => srs.filter(s => s.loai === l).length;
+  // Đếm phòng trên CẢ NHÀ (mọi tầng của phác thảo), không chỉ tầng đang vẽ
+  const allPh: any[] = (sk.tang || []).flatMap((t: any) => t.phong || []);
+  const cnt = (l: string) => allPh.filter((p: any) => String(p.loai) === l).length;
   const ask = (t: string) => sketchNotes.push(`? Cần gia chủ xác nhận: ${t}`);
   const uiBeds = Number(input.requestedBedrooms ?? ui.bedroomCount) || 0;
   const uiWc = Number(input.requestedBathrooms ?? ui.bathroomCount) || 0;
-  if (uiBeds && uiBeds !== cnt('ngu')) ask(`ô nhập ${uiBeds} phòng ngủ, bản vẽ tay có ${cnt('ngu')} — bản vẽ đang giữ bố trí tay; gia chủ chọn lại số phòng hoặc sửa phác thảo trên Phiếu.`);
-  if (uiWc && uiWc !== cnt('wc')) ask(`ô nhập ${uiWc} WC, bản vẽ tay có ${cnt('wc')}.`);
-  if (typeof ui.worshipRoom === 'boolean' && ui.worshipRoom !== cnt('tho') > 0) ask(`ô nhập ${ui.worshipRoom ? 'có' : 'không có'} phòng thờ, bản vẽ tay ${cnt('tho') ? 'có' : 'không có'}.`);
+  if (floor === 1 && uiBeds && uiBeds !== cnt('ngu')) ask(`ô nhập ${uiBeds} phòng ngủ, bản vẽ tay có ${cnt('ngu')} — bản vẽ đang giữ bố trí tay; gia chủ chọn lại số phòng hoặc sửa phác thảo trên Phiếu.`);
+  if (floor === 1 && uiWc && uiWc !== cnt('wc')) ask(`ô nhập ${uiWc} WC, bản vẽ tay có ${cnt('wc')}.`);
+  if (floor === 1 && typeof ui.worshipRoom === 'boolean' && ui.worshipRoom !== cnt('tho') > 0) ask(`ô nhập ${ui.worshipRoom ? 'có' : 'không có'} phòng thờ, bản vẽ tay ${cnt('tho') ? 'có' : 'không có'}.`);
 
   /* ── 2. Kích thước cột / hàng từ diện tích ghi tay ── */
   // Ưu tiên: số đo nhà trong MÔ TẢ / ô nhập của gia chủ > số ghi trên bản vẽ tay (bản vẽ chỉ để tham chiếu bố trí)
@@ -232,6 +234,13 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   if (dimsHouse && (num(sk.nha?.sau) || num(sk.nha?.rong)) && (num(sk.nha?.sau) !== Hfix || num(sk.nha?.rong) !== Wfix))
     sketchNotes.push(`✓ Dùng kích thước nhà gia chủ nhập ${Wfix}×${Hfix}m; số đo trên bản vẽ tay (${num(sk.nha?.rong) || '?'}×${num(sk.nha?.sau) || '?'}m) chỉ dùng tham chiếu bố trí.`);
   const withArea = srs.filter(s => s.area);
+  /* Hàng trước NHÔ RA khỏi khối chính? — hàng 0 có ô ngoài nhà (hiên / sân) xen phòng trong nhà, và diện tích ghi tay các
+     hàng còn lại đã ≈ đủ khối chính rộng × sâu theo mô tả → khối chính = mô tả, hàng trước (phòng nhô, sảnh, mái hiên) ở THÊM phía trước */
+  const OUTL = new Set(['hien', 'san']);
+  const row0 = srs.filter(s => s.r0 === 0 && s.rs === 1);
+  const row0Out = row0.filter(s => OUTL.has(s.loai)).length, row0In = row0.filter(s => !OUTL.has(s.loai)).length;
+  const mainLabel = srs.filter(s => s.r0 >= 1 && s.area).reduce((n, s) => n + (s.area || 0), 0);
+  const protrude = hasDims && !isLot && R >= 3 && row0Out > 0 && row0In > 0 && mainLabel >= 0.75 * Number(input.widthM) * Number(input.lengthM);
   // Phòng không ghi diện tích: dùng diện tích tối thiểu hợp lý làm "mục tiêu mềm" để không bị ép mỏng (vd bếp 1,2m)
   const SOFT: Record<string, number> = { bep: 12, an: 12, ngu: 13, khach: 22, tho: 12, wc: 4.5, doc_sach: 12, lam_viec: 10, sinh_hoat: 14, kho: 5, gara: 18, thang: 8 };
   // phòng chiếm nhiều ô: diện tích mềm tăng theo số ô (× 0,8 mỗi ô thêm)
@@ -246,8 +255,15 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     else { W0 = clamp(Number(input.widthM) || 10, 4, 60); H0 = clamp((Number(input.lengthM) || 15) - 3, 4, 60); }
   }
   let rh = Array(R).fill((H0 || (cellA ? (cellA * R * C) / (W0 || 10) : 10)) / R);
+  if (protrude && Hfix) rh = rh.map((_, i) => i === 0 ? 3.0 : Hfix / (R - 1));
   let cw = Array(C).fill(W0 ? W0 / C : (cellA ? cellA / rh[0] : 3.5));
-  const MINC = 1.2, MINR = 2.4;   // hàng phòng tối thiểu 2,4m (WC, kho); cột tối thiểu 1,2m
+  const MINC = 1.2, MINR = 1.2;
+  // Hành lang 1 ô: chỉ thu hẹp cột HOẶC hàng không có phòng 1-ô nào khác (không bóp nhỏ phòng gia chủ ghi diện tích)
+  const singlesIn = (dim: 'c' | 'r', k: number) => srs.filter(o => o.loai !== 'hanh_lang' && !OUTL.has(o.loai) && (dim === 'c' ? o.cs === 1 && o.c0 === k : o.rs === 1 && o.r0 === k)).length;
+  const corrPulls = srs.filter(s => s.loai === 'hanh_lang' && s.rs === 1 && s.cs === 1).map(s => {
+    const nc0 = singlesIn('c', s.c0), nr0 = singlesIn('r', s.r0);
+    return nc0 === 0 && (nr0 > 0 || nc0 <= nr0) ? { s, dim: 'c' as const } : nr0 === 0 ? { s, dim: 'r' as const } : null;
+  }).filter(Boolean) as { s: SR; dim: 'c' | 'r' }[];   // hàng phòng tối thiểu 2,4m (WC, kho); cột tối thiểu 1,2m
   for (let it = 0; it < 500 && fitList.length; it++) {
     const lc = Array(C).fill(0), nc = Array(C).fill(0), lr = Array(R).fill(0), nr = Array(R).fill(0);
     fitList.forEach(({ s, a, w }) => {
@@ -272,9 +288,15 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
       for (let c = s.c0; c < s.c0 + s.cs; c++) { lc[c] += gw; nc[c] += 2; }
       for (let r = s.r0; r < s.r0 + s.rs; r++) { lr[r] += gh; nr[r] += 2; }
     });
+    // hành lang / sảnh 1 ô: kéo cột & hàng của nó về ~1,3 m (không để lối đi phình to chiếm diện tích phòng)
+    corrPulls.forEach(({ s, dim }) => {
+      if (dim === 'c') { const g1 = 1.5 * Math.log(1.3 / cw[s.c0]); lc[s.c0] += g1; nc[s.c0] += 1.5; }
+      else { const g2 = 1.5 * Math.log(1.3 / rh[s.r0]); lr[s.r0] += g2; nr[s.r0] += 1.5; }
+    });
     cw = cw.map((v, c) => Math.max(MINC, nc[c] ? v * Math.exp(0.5 * lc[c] / nc[c]) : v));
     rh = rh.map((v, r) => Math.max(MINR, nr[r] ? v * Math.exp(0.5 * lr[r] / nr[r]) : v));
-    if (Hfix) { const k = Hfix / rh.reduce((a, b) => a + b, 0); rh = rh.map(v => v * k); }
+    if (Hfix && protrude) { const k = Hfix / rh.slice(1).reduce((a, b) => a + b, 0); rh = rh.map((v, i) => i === 0 ? clamp(v, 2.4, 4.8) : v * k); }
+    else if (Hfix) { const k = Hfix / rh.reduce((a, b) => a + b, 0); rh = rh.map(v => v * k); }
     if (Wfix) { const k = Wfix / cw.reduce((a, b) => a + b, 0); cw = cw.map(v => v * k); }
   }
   // ô không có phòng có diện tích → lấy trung bình
@@ -283,7 +305,15 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     if (total) { const d = r1(total - out.reduce((a, b) => a + b, 0)); out[out.length - 1] = r1(out[out.length - 1] + d); }
     return out;
   };
-  cw = roundTo(cw, Wfix); rh = roundTo(rh, Hfix);
+  cw = roundTo(cw, Wfix);
+  if (protrude && Hfix) { const r0v = r1(rh[0]); rh = [r0v, ...roundTo(rh.slice(1), Hfix)]; } else rh = roundTo(rh, Hfix);
+  // Nhà nhiều tầng: các tầng trên dùng CÙNG lưới cột / hàng với tầng 1 → tường, cột, cầu thang xếp chồng thẳng hàng
+  if (floor > 1 && floors > 1) {
+    try {
+      const g1: any = planFreeLayout({ ...input, floor: 1 });
+      if (Array.isArray(g1.gridCols) && Array.isArray(g1.gridRows) && g1.gridCols.length === C && g1.gridRows.length === R) { cw = g1.gridCols.slice(); rh = g1.gridRows.slice(); }
+    } catch { /* giữ lưới riêng */ }
+  }
   const W = r1(cw.reduce((a, b) => a + b, 0));
   const H = r1(rh.reduce((a, b) => a + b, 0));
   const colX = cw.reduce((acc: number[], v, i) => { acc.push(r1(acc[i] + v)); return acc; }, [0]);
@@ -319,8 +349,14 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     const w = r1(colX[s.c0 + s.cs] - x), h = r1(rowY[s.r0 + s.rs] - y);
     let name = s.ten && s.ten.length <= 26 ? s.ten : m.name;
     if (m.type === 'bedroom' && !s.ten) name = `P. Ngủ ${++bedNo}`;
-    const room: PlanRoom = { id: `sk_${i}_${s.loai}`, type: m.type, name, x, y, w, h, doors: [], windows: [], items: [], outside: m.type === 'porch' || undefined };
+    const room: PlanRoom = { id: `sk_${i}_${s.loai}`, type: m.type, name, x, y, w, h, doors: [], windows: [], items: [], outside: m.type === 'porch' || undefined, roofed: m.type === 'porch' ? s.loai === 'hien' || /mái/i.test(s.ten) : undefined };
     rooms.push(room); meta.set(room, s);
+  });
+  // Phần nhô trước: mái hiên & sảnh kính bám sát khối chính, sâu ~2 m (như nét vẽ); phần trước đó là sân trống
+  if (protrude && rh[0] > 2.6) rooms.forEach(rm => {
+    const m = meta.get(rm); if (!m || m.r0 !== 0 || m.rs !== 1 || !['hien', 'sanh'].includes(m.loai)) return;
+    rm.y = r1(rowY[1] - 2.0); rm.h = 2.0;
+    if (m.loai === 'sanh') rooms.push({ id: `san_${rm.id}`, type: 'porch', name: 'Sân', x: rm.x, y: 0, w: rm.w, h: r1(rowY[1] - 2.0), outside: true, roofed: false, doors: [], windows: [], items: [] });
   });
   // ô trống → sảnh / lối đi (gộp theo hàng)
   for (let r = 0; r < R; r++) {
@@ -367,16 +403,25 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   };
 
   /* ── 5. Cửa chính ── */
-  const findRoom = (key: any): PlanRoom | undefined => {
+  const findRoom = (key: any, side?: Side): PlanRoom | undefined => {
     if (!key) return undefined;
     const k = strip(key);
-    return rooms.find(r => strip(meta.get(r)?.ten) === k) || rooms.find(r => { const t = strip(meta.get(r)?.ten); return !!t && (t.includes(k) || k.includes(t)); })
-      || rooms.find(r => meta.get(r)?.loai === key);
+    const pick = (list: PlanRoom[]) => (side ? list.find(r => !r.outside && isExteriorSeg(r, side).length) : undefined) || list[0];
+    // nhiều phòng trùng tên (vd 2 "Hành lang") → ưu tiên phòng có tường ngoài đúng phía gia chủ vẽ cửa
+    return pick(rooms.filter(r => strip(meta.get(r)?.ten) === k)) || pick(rooms.filter(r => { const t = strip(meta.get(r)?.ten); return !!t && (t.includes(k) || k.includes(t)); }))
+      || pick(rooms.filter(r => meta.get(r)?.loai === key));
   };
   const cuaList: any[] = Array.isArray(sk.cua) ? sk.cua : [];
   const cuaChinh = cuaList.find(c => c.loai === 'chinh');
   let mainRoom = findRoom(cuaChinh?.phong);
-  const mainSide: Side = CANH[cuaChinh?.canh] || 'front';
+  let mainSide: Side = CANH[cuaChinh?.canh] || 'front';
+  let mainPorch: PlanRoom | null = null;
+  // Cửa chính ghi ở "mái hiên / hiên" (ngoài nhà): cửa nằm trên tường giữa hiên và phòng phía sau hiên, mở ra hiên
+  if (mainRoom && mainRoom.outside) {
+    const porch = mainRoom, s0: Side = CANH[cuaChinh?.canh] || 'rear';
+    const nb = inside().filter(r => shared(porch, r)?.side === s0).sort((a, b) => (shared(porch, b)!.b - shared(porch, b)!.a) - (shared(porch, a)!.b - shared(porch, a)!.a))[0];
+    if (nb) { mainRoom = nb; mainSide = opp(s0); mainPorch = porch; }
+  }
   if (!mainRoom || mainRoom.outside) {
     const front = inside().filter(r => ['corridor', 'living', 'common'].includes(r.type) && (r.y < EPS || rooms.some(p => p.outside && shared(r, p)?.side === 'front')));
     // ô mặt tiền có cung tốt nhất cho cửa chính (sảnh / phòng khách), rồi mới ưu tiên sảnh
@@ -384,8 +429,9 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     mainRoom = front.sort((a, b) => frontScore(b) - frontScore(a) || (a.type === 'corridor' ? -1 : 0) - (b.type === 'corridor' ? -1 : 0) || b.w - a.w)[0] || inside().find(r => r.type === 'living') || inside()[0];
   }
   let mainDoor: PlanDoor | null = null;
-  if (mainRoom) {
-    const segs = [...isExteriorSeg(mainRoom, mainSide), ...rooms.filter(p => p.outside).map(p => shared(mainRoom!, p)).filter((s): s is Seg => !!s && s.side === mainSide)];
+  if (mainRoom && floor === 1) {     // cửa chính chỉ ở tầng 1
+    const porchSeg = mainPorch ? shared(mainRoom, mainPorch) : null;
+    const segs = porchSeg ? [porchSeg] : [...isExteriorSeg(mainRoom, mainSide), ...rooms.filter(p => p.outside).map(p => shared(mainRoom!, p)).filter((s): s is Seg => !!s && s.side === mainSide)];
     const seg = segs.sort((a, b) => (b.b - b.a) - (a.b - a.a))[0];
     if (seg) {
       // vị trí cửa: ô 9 cung mặt tiền tốt nhất trong đoạn tường
@@ -413,6 +459,9 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   const bepPhu = outdoor.find(o => o.loai === 'bep_phu');
   const cuaPhuSk = cuaList.find(c => c.loai === 'phu' || c.ra === 'bep_phu' || c.ra === 'vuon');
   const needService = !!bepPhu || !!cuaPhuSk;
+  // Chỉ dựng bếp phụ (đun củi) + lối đi có mái khi gia chủ VẼ / GHI bếp phụ — cửa phụ ra sân, vườn thì chỉ là cửa (không tự thêm công trình)
+  const wantOutKitchen = !!bepPhu || cuaPhuSk?.ra === 'bep_phu';
+  const svcTo = wantOutKitchen ? 'bếp phụ' : cuaPhuSk?.ra === 'vuon' ? 'vườn' : 'sân';
   const kitchen = inside().find(r => r.type === 'kitchen');
   const dining = inside().find(r => r.type === 'dining');
   const wcs = inside().filter(r => r.type === 'wc');
@@ -437,7 +486,8 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
         let pen = base, why = '';
         if (route) {
           const d = distPoly(front, route);
-          if (d < 1.4) { pen += 60 + 60 * (1.4 - d); why = 'nằm trên lối ra bếp phụ'; }
+          // lối ra bếp phụ (khói, củi) thì tránh hẳn; lối ra sân / vườn thông thường chỉ phạt nhẹ
+          if (d < 1.4) { pen += wantOutKitchen ? 60 + 60 * (1.4 - d) : 8; why = wantOutKitchen ? 'nằm trên lối ra bếp phụ' : ''; }
         }
         if (mainPt && Math.hypot(front[0] - mainPt[0], front[1] - mainPt[1]) < 3) pen += 20;
         list.push({ room: wc, to: o, seg, c, pen, why });
@@ -515,7 +565,7 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     }));
     svc = svcCands.sort((a, b) => a.pen - b.pen)[0] || null;
     // So với ý phác thảo: cửa phụ khách vẽ (phòng + cạnh) có đi qua trước cửa WC không
-    const skOwner = findRoom(cuaPhuSk?.phong);
+    const skOwner = findRoom(cuaPhuSk?.phong, skSvcSide);
     if (skSvcSide) {
       const route0: [number, number][] = [];
       if (skOwner && !skOwner.outside) {
@@ -567,17 +617,17 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     const sketchBad = !!sketchSvcPen && (sketchSvcPen.viaWc || sketchSvcPen.ownerBad);
     const optDiffers = !!svcOpt && !!svcSketch && (svcOpt.owner !== svcSketch.owner || svcOpt.seg.side !== svcSketch.seg.side);
     if (!applyAdvice && svcSketch) {
-      sketchNotes.push(`✓ Giữ cửa phụ ra bếp phụ ở ${sideTxt} như phác thảo.`);
-      if (optDiffers && (sketchBad || svcOpt!.pen < svcSketch.pen - 3)) advice.push(`Chuyển cửa phụ ra ${optTxt}${sketchBad ? ': lối từ bếp ra bếp phụ hiện đi ngang trước cửa WC' : ': lối đi ngắn hơn'}; đề xuất đi thẳng từ bếp ra, không qua WC, khói bếp củi không theo gió vào nhà.`);
+      sketchNotes.push(`✓ Giữ cửa phụ ra ${svcTo} ở ${sideTxt} như phác thảo.`);
+      if (optDiffers && (sketchBad || svcOpt!.pen < svcSketch.pen - 3)) advice.push(`Chuyển cửa phụ ra ${optTxt}${sketchBad ? `: lối từ bếp ra ${svcTo} hiện đi ngang trước cửa WC` : ': lối đi ngắn hơn'}; đề xuất đi thẳng từ bếp ra, không qua WC${wantOutKitchen ? ', khói bếp củi không theo gió vào nhà' : ''}.`);
     } else if (applyAdvice && optDiffers) {
       sketchNotes.push(`↺ Đã áp dụng đề xuất: cửa phụ chuyển ra ${sideTxt}${sketchBad ? ' (phác thảo đi ngang trước cửa WC)' : ''}.`);
-      advice.push(`Cửa phụ chuyển ra ${sideTxt}: từ bếp đi thẳng ra bếp phụ, không qua trước cửa WC.`);
+      advice.push(`Cửa phụ chuyển ra ${sideTxt}: từ bếp đi thẳng ra ${svcTo}, không qua trước cửa WC.`);
     } else {
-      sketchNotes.push(`✓ Cửa phụ ra bếp phụ ở ${sideTxt}${skSvcSide ? ' như phác thảo' : ' (phác thảo chưa vẽ cửa phụ — tool chọn chỗ tốt nhất)'}.`);
+      sketchNotes.push(`✓ Cửa phụ ra ${svcTo} ở ${sideTxt}${skSvcSide ? ' như phác thảo' : ' (phác thảo chưa vẽ cửa phụ — tool chọn chỗ tốt nhất)'}.`);
     }
-    checks.push({ ok: wcDist >= 1.4, text: wcDist >= 1.4 ? `Lối ra bếp phụ không đi qua trước cửa WC (cách ${r1(wcDist)}m) ✓` : `Lối ra bếp phụ còn gần cửa WC (${r1(wcDist)}m) — nên làm vách ngăn che cửa WC.` });
+    checks.push({ ok: wcDist >= 1.4, text: wcDist >= 1.4 ? `Lối ra ${svcTo} không đi qua trước cửa WC (cách ${r1(wcDist)}m) ✓` : `Lối ra ${svcTo} còn gần cửa WC (${r1(wcDist)}m) — nên làm vách ngăn che cửa WC.` });
     const wp = windPen(svc.seg.side);
-    checks.push({ ok: wp < 6, text: wp < 6 ? `Bếp phụ đặt phía ${sideBearing(svc.seg.side)}: không nằm đầu hướng gió chính mùa hè (Nam / Đông Nam), khói củi ít bay vào nhà ✓` : `Bếp phụ phía ${sideBearing(svc.seg.side)} nằm đầu hướng gió — cần ống khói cao hơn mái nhà ≥ 0,6m.` });
+    if (wantOutKitchen) checks.push({ ok: wp < 6, text: wp < 6 ? `Bếp phụ đặt phía ${sideBearing(svc.seg.side)}: không nằm đầu hướng gió chính mùa hè (Nam / Đông Nam), khói củi ít bay vào nhà ✓` : `Bếp phụ phía ${sideBearing(svc.seg.side)} nằm đầu hướng gió — cần ống khói cao hơn mái nhà ≥ 0,6m.` });
   }
 
   /* ── 7. Cửa các phòng còn lại ── */
@@ -662,7 +712,8 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   }
   const paths: { pts: [number, number][]; label: string; color: string }[] = [];
   let svcSide: Side | null = null;
-  if (svc) {
+  if (svc) svcSide = svc.seg.side;
+  if (svc && wantOutKitchen) {
     svcSide = svc.seg.side;
     const d = svc.owner.doors.find(x => x.service)!;
     const [dx, dy] = doorPoint(svc.owner, d);
@@ -818,8 +869,14 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   // phòng thờ
   inside().filter(r => r.type === 'worship').forEach(r => {
     const sol = solidSides(r);
-    const sc = (s: Side) => faceScore(opp(s)) - (wallShares(r, s, ['wc']) ? 20 : 0) - (wallShares(r, s, ['kitchen']) ? 8 : 0) - (s === 'front' ? 1 : 0);
-    const back = (sol.length ? sol : (['rear', 'left', 'right', 'front'] as Side[])).sort((a, b) => sc(b) - sc(a))[0];
+    // Mặc định như cách gia chủ vẽ thường hiểu: bàn thờ tựa tường ĐỐI DIỆN cửa vào, nhìn ra cửa. Phong thủy hướng chỉ để chọn khi hòa điểm.
+    const doorSide = r.doors[0]?.side;
+    const sc = (s: Side) => (doorSide && s === opp(doorSide) ? 30 : 0) + 0.3 * faceScore(opp(s)) - (wallShares(r, s, ['wc']) ? 20 : 0) - (wallShares(r, s, ['kitchen']) ? 8 : 0) - (s === doorSide ? 40 : 0);
+    // tường đối diện cửa vào là chỗ đặt bàn thờ dù đang có cửa sổ → bỏ cửa sổ tường đó (lưng bàn thờ phải là tường đặc)
+    const want = doorSide ? opp(doorSide) : null;
+    const cand = want && !sol.includes(want) && !r.doors.some(d => d.side === want) && !wallShares(r, want, ['wc']) ? [...sol, want] : sol;
+    const back = (cand.length ? cand : (['rear', 'left', 'right', 'front'] as Side[])).sort((a, b) => sc(b) - sc(a))[0];
+    if (r.windows.includes(back)) r.windows = r.windows.filter(w => w !== back);
     const aw = Math.min(1.97, (back === 'front' || back === 'rear' ? r.w : r.h) - 0.6), ad = 0.61;
     const horiz = back === 'front' || back === 'rear';
     const ax = back === 'left' ? r.x + 0.05 : back === 'right' ? r.x + r.w - ad - 0.05 : r.x + (r.w - aw) / 2;
@@ -894,7 +951,8 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
   if (withArea.length && (ratio > 3 || ratio < 0.33)) sketchNotes.push(`? Nhà ${W} × ${H} m khá ${ratio > 3 ? 'dài ngang' : 'hẹp'}: tổng diện tích ghi tay ~${Math.round(areaSum)}m²${Hfix ? ` với chiều sâu ${Hfix}m` : ''}. Anh/chị kiểm tra lại số đo hoặc diện tích ghi trên bản vẽ.`);
   if (sk.nguon === 'o_nhap') sketchNotes.unshift(`✓ Bố trí theo YÊU CẦU TỪNG PHÒNG của gia chủ: ${srs.filter(s => s.raw?.nguon === 'gia_chu').length} phòng đúng vị trí gia chủ chọn, ${srs.filter(s => s.raw?.nguon === 'tu_dong').length} phòng tool tự đặt.`);
   else sketchNotes.unshift(`✓ Vẽ theo phác thảo tự do: giữ đúng vị trí ${srs.length} phòng (lưới ${R} hàng × ${C} cột)${withArea.length ? `, ${keptArea}/${withArea.length} phòng khớp diện tích ghi tay (±15%)` : ''}.`);
-  sketchNotes.unshift(dimsHouse
+  if (protrude) sketchNotes.unshift(`✓ Khối chính ${Wfix} × ${Hfix} m đúng mô tả; hàng trước theo phác thảo (${row0.filter(s => !OUTL.has(s.loai)).map(s => s.ten || s.loai).join(', ')}) NHÔ RA thêm ${rh[0]} m, phần ${row0.filter(s => OUTL.has(s.loai)).map(s => s.ten || s.loai).join(', ')} để trống / có mái hiên. Lý do: tổng diện tích ghi tay các phòng còn lại ≈ ${Math.round(mainLabel)} m² đã gần đủ khối chính ${Math.round(Wfix * Hfix)} m². Nếu đất chỉ sâu ${Hfix} m, anh/chị báo để tool dồn hàng trước vào trong.`);
+  sketchNotes.unshift(protrude ? `✓ Nhà ${W} × ${H} m (khối chính ${Wfix} × ${Hfix} m + phần nhô trước ${rh[0]} m).` : dimsHouse
     ? (sk.nguon === 'o_nhap' ? `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập.` : `✓ Nhà ${W} × ${H} m theo kích thước gia chủ nhập; bản vẽ tay chỉ dùng để xếp vị trí phòng${withArea.length ? ' (diện tích ghi tay quy đổi theo tỷ lệ)' : ''}.`)
     : `✓ Nhà ${W} × ${H} m${Hfix ? ` (chiều sâu ${Hfix}m theo phác thảo)` : ''}${Wfix ? ` (chiều ngang ${Wfix}m theo phác thảo)` : ''}${!Hfix && !Wfix && withArea.length ? ' — suy ra từ diện tích ghi trên bản vẽ' : ''}; phần quanh nhà là khu vực ngoài nhà minh họa.`);
   (Array.isArray(sk.doc_khong_ro) ? sk.doc_khong_ro : []).slice(0, 4).forEach((t: any) => sketchNotes.push(`? Chưa đọc rõ: "${t}" — anh/chị kiểm tra lại phiếu.`));
@@ -922,8 +980,9 @@ export function planFreeLayout(input: PlannerInput): FloorPlanResult {
     density: { lotArea, footprint, pct, maxPct },
     bedroomsThisFloor: totalBeds, totalBedroomsPlaced: totalBeds, totalBedroomsRequested: totalBeds,
     mode: 'free', lot, paths, road: { side: roadSide, label: 'ĐƯỜNG VÀO' },
-    advice, adviceApplied: applyAdvice
-  };
+    advice, adviceApplied: applyAdvice,
+    gridCols: cw, gridRows: rh
+  } as FloorPlanResult;
 }
 
 function maxDensity(lotArea: number): number {

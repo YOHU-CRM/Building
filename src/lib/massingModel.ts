@@ -14,10 +14,11 @@ export type MatKey =
   | 'wall_ext' | 'wall_int' | 'slab' | 'plinth' | 'glass' | 'door_main' | 'door' | 'rolling'
   | 'roof_ton' | 'roof_ngoi' | 'roof_btct' | 'roof_thai' | 'ground' | 'lot' | 'pond' | 'garden' | 'yard'
   | 'porch' | 'column' | 'railing' | 'trunk' | 'leaf' | 'stair' | 'stone' | 'outkitchen' | 'chimney' | 'walkway_roof'
+  | 'frame' | 'ridge' | 'fascia' | 'solar' | 'paving' | 'shrub'
   | `floor_${string}`;
 
 export type Prim =
-  | { t: 'box'; x: number; y: number; z: number; sx: number; sy: number; sz: number; mat: MatKey; floor: number; tag?: 'roof' | 'roomFloor' | 'site' }
+  | { t: 'box'; x: number; y: number; z: number; sx: number; sy: number; sz: number; mat: MatKey; floor: number; tag?: 'roof' | 'roomFloor' | 'site'; rx?: number; rz?: number }
   | { t: 'gable'; x0: number; z0: number; x1: number; z1: number; y: number; rise: number; axis: 'x' | 'z'; mat: MatKey; floor: number; tag: 'roof' | 'site' }
   | { t: 'cyl'; x: number; y: number; z: number; r: number; h: number; mat: MatKey; floor: number; tag?: 'site' | 'roof' }
   | { t: 'sphere'; x: number; y: number; z: number; r: number; mat: MatKey; floor: number; tag?: 'site' }
@@ -40,6 +41,7 @@ export interface MassingInput extends Omit<PlannerInput, 'floor'> {
   roofType?: string;          // "Tôn lạnh", "Mái ngói", "Mái bằng", "Mái Thái"...
   floorHeight1?: number | string;      // chiều cao tầng 1 (m), mặc định 3,6
   floorHeightUpper?: number | string;  // chiều cao tầng trên (m), mặc định 3,3
+  solar?: boolean;            // mô tả có điện mặt trời áp mái → đặt tấm pin trên mái hướng Nam nhất
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -158,25 +160,76 @@ export function buildMassing(input: MassingInput): MassingModel {
       }
     } else {
       const ov = 0.6;
-      const W = bb.x1 - bb.x0, D = bb.y1 - bb.y0;
       const pitchDeg = roofKind === 'ton' ? 15 : roofKind === 'ngoi' ? 30 : 35;
-      const along: 'x' | 'z' = W >= D ? 'x' : 'z';          // nóc chạy theo cạnh dài
-      const span = (along === 'x' ? D : W) / 2 + ov;
       const tg = Math.tan(pitchDeg * Math.PI / 180);
-      const rise = r2(span * tg);
-      const ovRise = r2(ov * tg);          // mép mái hạ thấp để mặt mái đi qua đỉnh tường
-      // tường thu hồi/xây bao đỡ mái: sàn mái (trần)
       topWalled.forEach(r => pbox(r.x, r.y, r.w, r.h, topY - SLAB, topY, 'slab', floors + 1, 'roof'));
-      prims.push({ t: 'gable', x0: WX(bb.x0 - ov), x1: WX(bb.x1 + ov), z0: WZ(bb.y1 + ov), z1: WZ(bb.y0 - ov), y: r2(topY - ovRise), rise, axis: along, mat: roofMat, floor: floors + 1, tag: 'roof' });
-      // tường thu hồi 2 đầu hồi (đỡ mái)
-      if (along === 'x') {
-        [bb.x0, bb.x1 - 0.2].forEach(x => prims.push({ t: 'gable', x0: WX(x), x1: WX(x + 0.2), z0: WZ(bb.y1), z1: WZ(bb.y0), y: topY, rise: r2(rise - ovRise), axis: 'x', mat: 'wall_ext', floor: floors + 1, tag: 'roof' }));
-      } else {
-        [bb.y0, bb.y1 - 0.2].forEach(y => prims.push({ t: 'gable', x0: WX(bb.x0), x1: WX(bb.x1), z0: WZ(y + 0.2), z1: WZ(y), y: topY, rise: r2(rise - ovRise), axis: 'z', mat: 'wall_ext', floor: floors + 1, tag: 'roof' }));
-      }
+      // Nhà chữ L / chữ T (phần nhô, khối phụ): mỗi khối 1 mái riêng, khối phụ đâm vào mái chính — không trùm mái lên sân trống
+      const blocks = roofBlocks(topWalled);
+      const main = blocks.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0];
+      blocks.forEach(bk => {
+        let along: 'x' | 'z' = bk.w >= bk.h ? 'x' : 'z';      // nóc chạy theo cạnh dài
+        if (bk !== main) {                                     // khối phụ giáp khối chính: nóc vuông góc với cạnh giáp
+          if (Math.abs(bk.y + bk.h - main.y) < 0.05 || Math.abs(bk.y - (main.y + main.h)) < 0.05) along = 'z';
+          else if (Math.abs(bk.x + bk.w - main.x) < 0.05 || Math.abs(bk.x - (main.x + main.w)) < 0.05) along = 'x';
+        }
+        const span = (along === 'x' ? bk.h : bk.w) / 2 + ov;
+        const rise = r2(span * tg), ovRise = r2(ov * tg);
+        // khối phụ: mép giáp khối chính kéo vào trong mái chính 1 m để 2 mái liền nhau
+        let x0 = bk.x - ov, x1 = bk.x + bk.w + ov, y0 = bk.y - ov, y1 = bk.y + bk.h + ov;
+        if (bk !== main) {
+          if (Math.abs(bk.y + bk.h - main.y) < 0.05) y1 = bk.y + bk.h + 1.0; if (Math.abs(bk.y - (main.y + main.h)) < 0.05) y0 = bk.y - 1.0;
+          if (Math.abs(bk.x + bk.w - main.x) < 0.05) x1 = bk.x + bk.w + 1.0; if (Math.abs(bk.x - (main.x + main.w)) < 0.05) x0 = bk.x - 1.0;
+        }
+        prims.push({ t: 'gable', x0: WX(x0), x1: WX(x1), z0: WZ(y1), z1: WZ(y0), y: r2(topY - ovRise), rise, axis: along, mat: roofMat, floor: floors + 1, tag: 'roof' });
+        // nóc mái (úp nóc) + diềm mái
+        if (along === 'x') {
+          pbox(x0, bk.y + bk.h / 2 - 0.13, x1 - x0, 0.26, topY - ovRise + rise - 0.02, topY - ovRise + rise + 0.1, 'ridge', floors + 1, 'roof');
+          [y0, y1 - 0.04].forEach(yy => pbox(x0, yy, x1 - x0, 0.04, topY - ovRise - 0.18, topY - ovRise, 'fascia', floors + 1, 'roof'));
+          [bk.x, bk.x + bk.w - 0.2].forEach(x => { if (bk === main || !touchesX(bk, main, x)) prims.push({ t: 'gable', x0: WX(x), x1: WX(x + 0.2), z0: WZ(bk.y + bk.h), z1: WZ(bk.y), y: topY, rise: r2(rise - ovRise), axis: 'x', mat: 'wall_ext', floor: floors + 1, tag: 'roof' }); });
+        } else {
+          pbox(bk.x + bk.w / 2 - 0.13, y0, 0.26, y1 - y0, topY - ovRise + rise - 0.02, topY - ovRise + rise + 0.1, 'ridge', floors + 1, 'roof');
+          [x0, x1 - 0.04].forEach(xx => pbox(xx, y0, 0.04, y1 - y0, topY - ovRise - 0.18, topY - ovRise, 'fascia', floors + 1, 'roof'));
+          [bk.y, bk.y + bk.h - 0.2].forEach(y => { if (bk === main || !touchesY(bk, main, y)) prims.push({ t: 'gable', x0: WX(bk.x), x1: WX(bk.x + bk.w), z0: WZ(y + 0.2), z1: WZ(y), y: topY, rise: r2(rise - ovRise), axis: 'z', mat: 'wall_ext', floor: floors + 1, tag: 'roof' }); });
+        }
+        // Điện mặt trời áp mái (theo mô tả): tấm pin trên mặt mái của khối chính quay về phía Nam nhất
+        if (input.solar && bk === main) {
+          const southSide = (side: 'front' | 'rear' | 'left' | 'right') => { const b = { rear: 0, right: 90, front: 180, left: 270 }[side]; const brg = (((b + plans[0].facingDeg - 180) % 360) + 360) % 360; return Math.abs(((brg - 180 + 540) % 360) - 180); };
+          const sides = (along === 'x' ? ['front', 'rear'] : ['left', 'right']) as ('front' | 'rear' | 'left' | 'right')[];
+          const side = sides.sort((a, b) => southSide(a) - southSide(b))[0];
+          const slopeLen = span / Math.cos(Math.atan(tg)), ang = Math.atan(tg);
+          const pw = 1.05, pl = 1.75, gap = 0.05;
+          // đoạn mặt mái còn trống (không bị mái khối phụ đâm vào) — đặt pin ở đoạn dài nhất
+          const s0 = along === 'x' ? bk.x + 0.6 : bk.y + 0.6, s1 = along === 'x' ? bk.x + bk.w - 0.6 : bk.y + bk.h - 0.6;
+          let free: [number, number][] = [[s0, s1]];
+          blocks.filter(o => o !== bk).forEach(o => {
+            const onSide = along === 'x' ? (side === 'front' ? Math.abs(o.y + o.h - bk.y) < 0.05 : Math.abs(o.y - bk.y - bk.h) < 0.05) : (side === 'left' ? Math.abs(o.x + o.w - bk.x) < 0.05 : Math.abs(o.x - bk.x - bk.w) < 0.05);
+            if (!onSide) return;
+            const a = (along === 'x' ? o.x : o.y) - 0.8, b = (along === 'x' ? o.x + o.w : o.y + o.h) + 0.8;
+            free = free.flatMap(([p0, p1]) => { const r: [number, number][] = []; if (a > p0) r.push([p0, Math.min(p1, a)]); if (b < p1) r.push([Math.max(p0, b), p1]); return r; });
+          });
+          const seg0 = free.sort((u, v) => (v[1] - v[0]) - (u[1] - u[0]))[0] || [s0, s1];
+          const runLen = seg0[1] - seg0[0], runMid = (seg0[0] + seg0[1]) / 2;
+          const nAlong = Math.max(0, Math.min(12, Math.floor(runLen * 0.85 / (pw + gap))));
+          const nRows = slopeLen > 4.4 ? 2 : 1;
+          for (let rI = 0; rI < nRows; rI++) for (let i = 0; i < nAlong; i++) {
+            const t = 0.9 + rI * (pl + 0.1) + pl / 2;                       // khoảng cách từ nóc xuống theo mặt dốc
+            const dh = t * Math.cos(ang), dy = t * Math.sin(ang);
+            const yy = topY - ovRise + rise - dy + 0.06;
+            const off = -((nAlong - 1) * (pw + gap)) / 2 + i * (pw + gap);
+            if (along === 'x') {
+              const cxp = runMid + off, cyp = side === 'front' ? bk.y + bk.h / 2 - dh : bk.y + bk.h / 2 + dh;
+              prims.push({ t: 'box', x: WX(cxp), y: r2(yy), z: WZ(cyp), sx: pw, sy: 0.04, sz: pl, mat: 'solar', floor: floors + 1, tag: 'roof', rx: side === 'front' ? ang : -ang });
+            } else {
+              const cyp = runMid + off, cxp = side === 'left' ? bk.x + bk.w / 2 - dh : bk.x + bk.w / 2 + dh;
+              prims.push({ t: 'box', x: WX(cxp), y: r2(yy), z: WZ(cyp), sx: pl, sy: 0.04, sz: pw, mat: 'solar', floor: floors + 1, tag: 'roof', rz: side === 'left' ? ang : -ang });
+            }
+          }
+        }
+      });
     }
   }
 
+  const roofBlocksTop = roofKind === 'btct' ? [] : roofBlocks(walledOf(plans[floors - 1]));
   /* ── Ngoài nhà (tầng 1) ── */
   const eave1 = floors === 1 ? topY : floorBase[2];
   p1.rooms.filter(r => r.outside).forEach(r => {
@@ -195,13 +248,26 @@ export function buildMassing(input: MassingInput): MassingModel {
         break;
       }
       case 'porch': {
-        const inGrid = r.y >= -0.01;
+        // hiên nằm dưới mái chính (trong khối nhà) hay ở ngoài khối (mái hiên riêng / sân trống)
+        const covered = roofBlocksTop.some(b => r.x >= b.x - 0.05 && r.x + r.w <= b.x + b.w + 0.05 && r.y >= b.y - 0.05 && r.y + r.h <= b.y + b.h + 0.05);
+        if (!covered && r.roofed === false) { pbox(r.x, r.y, r.w, r.h, 0, 0.06, 'paving', 0, 'site'); break; }
+        const inGrid = covered;
         pbox(r.x, r.y, r.w, r.h, 0, inGrid ? PLINTH : PLINTH - 0.15, 'porch', 1);
         if (!inGrid) {
-          // mái hiên dốc nhẹ + cột
-          pbox(r.x - 0.3, r.y - 0.4, r.w + 0.6, r.h + 0.4, eave1 - 0.55, eave1 - 0.43, roofMat === 'roof_btct' ? 'roof_btct' : roofMat, 1, 'roof');
-          const n = Math.max(2, Math.ceil(r.w / 3.5) + 1);
-          for (let i = 0; i < n; i++) prims.push({ t: 'cyl', x: WX(r.x + 0.25 + (r.w - 0.5) * i / (n - 1)), y: (PLINTH + eave1 - 0.55) / 2, z: WZ(r.y + 0.25), r: 0.13, h: eave1 - 0.55 - PLINTH + 0.1, mat: 'column', floor: 1 });
+          // mái hiên dốc nhẹ ra phía ngoài + cột ở góc không tựa tường
+          const walledG = walledOf(p1);
+          const touch = (s0: Side) => walledG.some(o => s0 === 'rear' ? Math.abs(o.y - (r.y + r.h)) < 0.05 && o.x < r.x + r.w && o.x + o.w > r.x : s0 === 'front' ? Math.abs(o.y + o.h - r.y) < 0.05 && o.x < r.x + r.w && o.x + o.w > r.x : s0 === 'left' ? Math.abs(o.x + o.w - r.x) < 0.05 && o.y < r.y + r.h && o.y + o.h > r.y : Math.abs(o.x - (r.x + r.w)) < 0.05 && o.y < r.y + r.h && o.y + o.h > r.y);
+          const back: Side = (['rear', 'left', 'right', 'front'] as Side[]).find(touch) || 'rear';
+          const hi = eave1 - 0.2, lo = hi - Math.max(0.25, (back === 'rear' || back === 'front' ? r.h : r.w) * 0.17);
+          const ang = Math.atan((hi - lo) / Math.max(0.5, back === 'rear' || back === 'front' ? r.h : r.w));
+          const len = (back === 'rear' || back === 'front' ? r.h : r.w) + 0.5;
+          const cxp = back === 'left' ? r.x + r.w / 2 + 0.25 : back === 'right' ? r.x + r.w / 2 - 0.25 : r.x + r.w / 2;
+          const cyp = back === 'rear' ? r.y + r.h / 2 - 0.25 : back === 'front' ? r.y + r.h / 2 + 0.25 : r.y + r.h / 2;
+          if (back === 'rear' || back === 'front') prims.push({ t: 'box', x: WX(cxp), y: r2((hi + lo) / 2), z: WZ(cyp), sx: r.w + 0.6, sy: 0.07, sz: r2(len / Math.cos(ang)), mat: roofMat === 'roof_btct' ? 'roof_btct' : roofMat, floor: 1, tag: 'roof', rx: back === 'rear' ? ang : -ang });
+          else prims.push({ t: 'box', x: WX(cxp), y: r2((hi + lo) / 2), z: WZ(cyp), sx: r2(len / Math.cos(ang)), sy: 0.07, sz: r.h + 0.6, mat: roofMat === 'roof_btct' ? 'roof_btct' : roofMat, floor: 1, tag: 'roof', rz: back === 'left' ? -ang : ang });
+          const corners: [number, number][] = [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]];
+          corners.filter(([cx2, cy2]) => !walledG.some(o => cx2 >= o.x - 0.05 && cx2 <= o.x + o.w + 0.05 && cy2 >= o.y - 0.05 && cy2 <= o.y + o.h + 0.05))
+            .forEach(([cx2, cy2]) => prims.push({ t: 'cyl', x: WX(cx2 + (cx2 > r.x + r.w / 2 ? -0.18 : 0.18)), y: (PLINTH + lo) / 2, z: WZ(cy2 + (cy2 > r.y + r.h / 2 ? -0.18 : 0.18)), r: 0.12, h: lo - PLINTH + 0.05, mat: 'column', floor: 1 }));
         } else {
           // hiên nằm trong mái chính: cột ở góc tự do
           const walledG = walledOf(p1);
@@ -253,6 +319,19 @@ export function buildMassing(input: MassingInput): MassingModel {
     const out = outwardV(d.side);
     prims.push({ t: 'label', x: WX(px + out[0] * 1.2), y: 3.1, z: WZ(py + out[1] * 1.2), text: 'CỬA CHÍNH', color: '#dc2626', floor: 0, tag: 'site' });
   }
+  // lối đi lát đá từ cửa chính ra sân trước + cây xanh minh họa ở góc sau khu đất (không phải hạng mục thiết kế)
+  if (mainRoom) {
+    const d = mainRoom.doors.find(x => x.main)!;
+    const [px, py] = doorAbs(mainRoom, d);
+    if (d.side === 'front') { const yEnd = lot.y; const yStart = Math.min(py, ...p1.rooms.filter(r => r.outside && r.roofed && px > r.x && px < r.x + r.w).map(r => r.y)); if (yStart - yEnd > 0.3) pbox(px - 0.75, yEnd, 1.5, yStart - yEnd, 0, 0.05, 'paving', 0, 'site'); }
+  }
+  if (!p1.rooms.some(r => r.type === 'garden')) {
+    const bbH = bboxOf(walledOf(p1));
+    if (bbH) [[bbH.x0 - 2.0, bbH.y1 + 1.5], [bbH.x1 + 2.0, bbH.y1 + 1.5], [bbH.x1 + 2.2, bbH.y0 - 1.0]].forEach(([x, y], i) => {
+      prims.push({ t: 'cyl', x: WX(x), y: 0.9, z: WZ(y), r: 0.12, h: 1.8, mat: 'trunk', floor: 0, tag: 'site' });
+      prims.push({ t: 'sphere', x: WX(x), y: 2.5, z: WZ(y), r: i === 2 ? 1.0 : 1.3, mat: 'leaf', floor: 0, tag: 'site' });
+    });
+  }
   // la bàn trên mặt đất
   const D = p1.facingDeg;
   const cx = lot.x + lot.w / 2, cy = lot.y + lot.h / 2, R = Math.max(lot.w, lot.h) / 2 + 2.5;
@@ -278,6 +357,33 @@ export function buildMassing(input: MassingInput): MassingModel {
 }
 
 /* ───────────── tiện ích hình học ───────────── */
+type Blk = { x: number; y: number; w: number; h: number };
+/** Chia mặt bằng (các phòng có tường) thành các khối chữ nhật để lợp mái: nhà chữ nhật = 1 khối; chữ L/T = khối chính + khối phụ */
+export function roofBlocks(rs: PlanRoom[], depth = 0): Blk[] {
+  const bb = bboxOf(rs);
+  if (!bb) return [];
+  const blk = { x: bb.x0, y: bb.y0, w: bb.x1 - bb.x0, h: bb.y1 - bb.y0 };
+  const area = rs.reduce((n, r) => n + r.w * r.h, 0);
+  if (depth >= 2 || area >= 0.9 * blk.w * blk.h || rs.length < 2) return [blk];
+  let best: { a: PlanRoom[]; b: PlanRoom[]; score: number } | null = null;
+  const tryCut = (horiz: boolean, c: number) => {
+    const a = rs.filter(r => horiz ? r.y + r.h <= c + 0.01 : r.x + r.w <= c + 0.01), b = rs.filter(r => horiz ? r.y >= c - 0.01 : r.x >= c - 0.01);
+    if (!a.length || !b.length || a.length + b.length !== rs.length) return;
+    const cov = (g: PlanRoom[]) => { const q = bboxOf(g)!; return g.reduce((n, r) => n + r.w * r.h, 0) / ((q.x1 - q.x0) * (q.y1 - q.y0)); };
+    // ưu tiên giữ khối chính lớn nhất nguyên vẹn (nhà chữ L = khối chính + phần nhô), rồi mới tới độ kín của từng khối
+    const ar = (g: PlanRoom[]) => g.reduce((n, r) => n + r.w * r.h, 0);
+    const score = 0.5 * Math.min(cov(a), cov(b)) + 0.5 * Math.max(ar(a), ar(b)) / area;
+    if (!best || score > best.score) best = { a, b, score };
+  };
+  [...new Set(rs.flatMap(r => [r.y, r.y + r.h]))].forEach(c => tryCut(true, c));
+  [...new Set(rs.flatMap(r => [r.x, r.x + r.w]))].forEach(c => tryCut(false, c));
+  if (!best) return [blk];
+  const B = best as { a: PlanRoom[]; b: PlanRoom[]; score: number };
+  return [...roofBlocks(B.a, depth + 1), ...roofBlocks(B.b, depth + 1)];
+}
+const touchesX = (b: Blk, m: Blk, x: number) => (Math.abs(x - m.x - m.w) < 0.25 || Math.abs(x + 0.2 - m.x) < 0.25) && b.y < m.y + m.h && b.y + b.h > m.y;
+const touchesY = (b: Blk, m: Blk, y: number) => (Math.abs(y - m.y - m.h) < 0.25 || Math.abs(y + 0.2 - m.y) < 0.25) && b.x < m.x + m.w && b.x + b.w > m.x;
+
 function bboxOf(rs: PlanRoom[]) {
   if (!rs.length) return null;
   return { x0: Math.min(...rs.map(r => r.x)), x1: Math.max(...rs.map(r => r.x + r.w)), y0: Math.min(...rs.map(r => r.y)), y1: Math.max(...rs.map(r => r.y + r.h)) };
@@ -402,8 +508,22 @@ function buildWalls(plan: FloorPlanResult, walled: PlanRoom[], insideAll: PlanRo
         if (o.a > cur) seg(cur, o.a, 0, H, mat);
         seg(o.a, o.b, 0, o.y0, mat);
         seg(o.a, o.b, o.y1, H, mat);
-        if (o.mat === 'glass') seg(o.a, o.b, o.y0, o.y1, 'glass', 0.03);
-        if (o.mat === 'door_main') { const w = o.b - o.a; seg(o.a + 0.03, o.a + w * 0.18, 0, o.y1, 'door_main', 0.06); seg(o.b - w * 0.18, o.b - 0.03, 0, o.y1, 'door_main', 0.06); }
+        if (o.mat === 'glass') {
+          seg(o.a, o.b, o.y0, o.y1, 'glass', 0.03);
+          if (kind === 'ext') {                     // khung cửa sổ + đố giữa (màu khung theo mô tả / đề xuất)
+            const fw = 0.06, fd = 0.12;
+            seg(o.a, o.b, o.y0, o.y0 + fw, 'frame', fd); seg(o.a, o.b, o.y1 - fw, o.y1, 'frame', fd);
+            seg(o.a, o.a + fw, o.y0, o.y1, 'frame', fd); seg(o.b - fw, o.b, o.y0, o.y1, 'frame', fd);
+            const n = Math.max(1, Math.round((o.b - o.a) / 0.9));
+            for (let i = 1; i < n; i++) { const xm = o.a + (o.b - o.a) * i / n; seg(xm - 0.025, xm + 0.025, o.y0, o.y1, 'frame', fd); }
+            seg(o.a - 0.05, o.b + 0.05, o.y0 - 0.05, o.y0, 'stone', 0.26);     // bậu cửa
+          }
+        }
+        if (o.mat === 'door_main') {               // cửa chính nhiều cánh + khung
+          const w = o.b - o.a, n = w >= 2 ? 4 : 2;
+          for (let i = 0; i < n; i++) seg(o.a + w * i / n + 0.02, o.a + w * (i + 1) / n - 0.02, 0, o.y1, 'door_main', 0.06);
+          seg(o.a - 0.06, o.b + 0.06, o.y1, o.y1 + 0.08, 'frame', 0.14); seg(o.a - 0.06, o.a, 0, o.y1, 'frame', 0.14); seg(o.b, o.b + 0.06, 0, o.y1, 'frame', 0.14);
+        }
         if (o.mat === 'rolling') seg(o.a, o.b, o.y1 - 0.35, o.y1, 'rolling', 0.12);
         cur = Math.max(cur, o.b);
       });
