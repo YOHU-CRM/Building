@@ -77,6 +77,8 @@ const AdminDesignManager = React.lazy(() => import("./components/AdminDesignMana
 import CustomerResultsCard, { PerspectiveShot } from "./components/CustomerResultsCard";
 import { computeSiteFor, setbacksFor, roomsFor, planDimsFor } from "./lib/siteGeometry";
 import { resolveExteriorPalette, wantsSolar } from './lib/exteriorPalette';
+import { setQuyDoiCoefficients } from './lib/boqEngine';
+import { setDonGiaKhoan } from './lib/unifiedPricing';
 // 3D hình khối: tải khi khách mở tab (không làm chậm trang chính)
 const Massing3DViewer = React.lazy(() => import("./components/Massing3DViewer"));
 const ElevationViewer = React.lazy(() => import("./components/ElevationViewer"));
@@ -218,6 +220,8 @@ export default function App() {
         if (typeof data.freePreview3D === 'boolean') setFreePreview3D(data.freePreview3D);
         if (typeof data.serverImageStorage === 'boolean') setServerImageStorage(data.serverImageStorage);
         if (typeof data.ctvCommissionEnabled === 'boolean') setCtvLedgerOn(data.ctvCommissionEnabled);
+        if (data.quyDoi && typeof data.quyDoi === 'object') { setQuyDoiCoefficients(data.quyDoi); setPricingRev(v => v + 1); }   // hệ số quy đổi do Admin đặt
+        if (data.donGiaKhoan && typeof data.donGiaKhoan === 'object') { setDonGiaKhoan(data.donGiaKhoan); setPricingRev(v => v + 1); }   // đơn giá khoán m² xây dựng (cách 3)
       })
       .catch(err => console.warn("Could not fetch dynamic GAS URL:", err));
   }, []);
@@ -226,7 +230,8 @@ export default function App() {
   // Admin bật/tắt mục video với khách (cài đặt trên máy chủ)
   const [videoOrderEnabled, setVideoOrderEnabled] = useState<boolean>(true);
   // Các công tắc admin (mặc định TẮT, admin bật ở tab ⚙️ Cài đặt)
-  const [freePreview3D, setFreePreview3D] = useState<boolean>(false);          // khách chưa mua được xoay xem 3D (bản xem thử)
+  const [freePreview3D, setFreePreview3D] = useState<boolean>(false);
+  const [pricingRev, setPricingRev] = useState(0);        // tăng khi hệ số quy đổi đổi → tính lại giá          // khách chưa mua được xoay xem 3D (bản xem thử)
   const [serverImageStorage, setServerImageStorage] = useState<boolean>(false); // lưu ảnh phối cảnh lên máy chủ (Firebase Storage)
   const [ctvLedgerOn, setCtvLedgerOn] = useState<boolean>(false);               // máy chủ ghi sổ hoa hồng CTV khi admin xác nhận thu tiền
   const ctvLedgerOnRef = useRef(false);
@@ -761,7 +766,7 @@ export default function App() {
   const pricedAiReport = useMemo(() => {
     if (!aiReport) return aiReport;
     try { return applyUnifiedPricing(aiReport as any, { constructionInfo, userInfo }) as any; } catch { return aiReport; }
-  }, [aiReport, constructionInfo, userInfo]);
+  }, [aiReport, constructionInfo, userInfo, pricingRev]);
 
   // Lấy gói đã được máy chủ xác nhận (khi mở web, đổi khách, hoặc quay lại tab sau khi thanh toán)
   const refreshVerifiedPackage = async (): Promise<'free' | 'standard' | 'design'> => {
@@ -2437,7 +2442,7 @@ ${sumOff ? `
         <div class="badge">${goiLabel}</div>
       </div>
       <div class="meta-bar">
-        <span>${ct.constructionType || 'Nhà ở'} · ${est.floors} tầng · ${est.areaPerFloor} m²/sàn · tổng sàn ~${est.totalFloorArea} m²</span>
+        <span>${ct.constructionType || 'Nhà ở'} · ${est.floors} tầng · sàn sử dụng ${est.usableArea} m² · quy đổi ${est.totalFloorArea} m²</span>
         <span>Ngày xuất <b>${ngay}</b></span>
       </div>
     </div>
@@ -2495,7 +2500,7 @@ ${sumOff ? `
         <div class="cell"><div class="cell-label">Giới Tính & Cung Phi</div><div class="cell-value">${gender === 'nam' ? 'Nam mạng' : 'Nữ mạng'} · <b>${fs.cungPhi}</b></div></div>
         <div class="cell"><div class="cell-label">Hướng Đất Dự Định</div><div class="cell-value">${desiredDirection || 'Chưa chọn'}${fs.directionVerdict?.star ? ` · <b style="color:${fs.directionVerdict.isGood ? '#047857' : '#dc2626'}">${fs.directionVerdict.star} — ${fs.directionVerdict.isGood ? 'HỢP' : 'KHÔNG HỢP'}</b>` : ''}</div></div>
         <div class="cell"><div class="cell-label">Loại Công Trình</div><div class="cell-value">${ct.constructionType || 'Nhà phố / Nhà ở dân dụng'}</div></div>
-        <div class="cell"><div class="cell-label">Diện Tích Xây Dựng</div><div class="cell-value">${est.areaPerFloor} m²/sàn · <b>Tổng sàn: ~${est.totalFloorArea} m²</b></div></div>
+        <div class="cell"><div class="cell-label">Diện Tích Xây Dựng</div><div class="cell-value">Xây dựng ${est.areaPerFloor} m² · <b>Sàn sử dụng ${est.usableArea} m²</b> · quy đổi ${est.totalFloorArea} m²</div></div>
         <div class="cell"><div class="cell-label">Quy Mô Số Tầng</div><div class="cell-value">${est.floors} Tầng · cao tầng 1: ${Number(ct.floorHeight1) || 3.6}m${est.floors > 1 ? ` · tầng trên: ${Number(ct.floorHeightUpper) || 3.3}m` : ''}</div></div>
         <div class="cell"><div class="cell-label">Ngân Sách Dự Kiến</div><div class="cell-value">${ct.totalBudget ? formatCurrency(ct.totalBudget, lang) : 'Chưa nhập'}${ct.totalBudget && est.selectedOption ? ` · <b style="color:${Number(ct.totalBudget) >= est.selectedOption.totalCost ? '#047857' : '#dc2626'}">${Number(ct.totalBudget) >= est.selectedOption.totalCost ? 'ĐỦ' : 'THIẾU ~' + formatCurrency(est.selectedOption.totalCost - Number(ct.totalBudget), lang)} so với dự toán</b>` : ''}</div></div>
       </div>
@@ -2580,7 +2585,7 @@ ${goi !== 'free' ? `
       </div>
       <div class="meta-bar">
         <span>Công trình: <b>${ct.constructionType || 'Nhà dân dụng'} ${est.floors} Tầng</b></span>
-        <span>Diện tích sàn: <b>~${est.totalFloorArea} m²</b></span>
+        <span>Sàn sử dụng: <b>${est.usableArea} m²</b> · quy đổi ${est.totalFloorArea} m²</span>
         <span>Hotline Kỹ sư: <b>${hotline}</b></span>
       </div>
     </div>
@@ -2609,7 +2614,7 @@ ${goi !== 'free' ? `
 
     <!-- GIẢI TRÌNH DIỆN TÍCH SỬ DỤNG VS DIỆN TÍCH SÀN THI CÔNG -->
     <div style="margin-top: 6px; margin-bottom: 6px; padding: 6px 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 8.5px; line-height: 1.45; color: #78350f;">
-      <b>📐 GIẢI THÍCH DIỆN TÍCH SÀN XÂY DỰNG:</b> Diện tích khuôn viên/sử dụng trệt là <b>${est.areaPerFloor}m²</b>. Theo phương pháp quy chuẩn xây dựng, tổng diện tích quy đổi để bóc tách khối lượng và dự toán là <b>${est.totalFloorArea}m²</b> sàn (Hệ số 1.30 bao gồm: Móng băng/móng bè ngầm 30% + Sàn trệt chịu lực 100% + Mái sê-nô thoát nước 30%). Toàn bộ danh mục vật tư - nhân công dưới đây được tính toán chi tiết 100% khớp chuẩn với tổng giá trị công trình chìa khóa trao tay.
+      <b>📐 DIỆN TÍCH & GIÁ THEO m² (3 cách):</b> Diện tích xây dựng <b>${est.areaPerFloor}m²</b>. ${est.methods.map((m: any) => m.applicable ? `<b>${m.title}</b>: ${m.area} ${m.areaLabel} × ${Math.round(m.rate).toLocaleString('vi-VN')} đ/m² = <b>${Math.round(m.total).toLocaleString('vi-VN')} đ</b>${m.key === 'quy_doi' ? ` (${est.quyDoiDetail.map((l: any) => `${l.label} ${l.area}m² × ${l.pct}%`).join(' + ')})` : ''}.` : `<b>${m.title}</b>: ${m.note}`).join(' ')} Cách 1 và 2 cùng một tổng dự toán bóc tách; khi so báo giá nhà thầu, đơn giá nhà thầu báo thường là đơn giá quy đổi — không nhân với m² sử dụng. Dự toán sơ bộ, sai số ±10–15%.
     </div>
 
     <!-- Section 2: Bảng BOQ Khối lượng vật tư chủ yếu -->
