@@ -13,6 +13,7 @@ import {
 } from '../data/boqStandards';
 import { StructuralOptionKey } from './boqEngine';
 import { getUnifiedEstimate } from './unifiedPricing';
+import { getLunarBirthYear, getCanChi } from './fengshui';
 import { generateArchitecturalFloorPlanSvg } from './architecturalFloorPlan';
 import { computeArchitecturalLayoutModel } from './architecturalLayoutModel';
 import { cleanAndNormalizeVietnameseText } from './documentFormatter';
@@ -40,9 +41,10 @@ export async function exportSpecificationToPdf({
 
   const clientName = cleanAndNormalizeVietnameseText(userInfo?.name || 'Gia Chủ');
   const clientAddress = cleanAndNormalizeVietnameseText(userInfo?.address || 'Việt Nam');
-  const birthYear = userInfo?.birthDate ? new Date(userInfo.birthDate).getFullYear() : 1979;
+  const lunarBY = userInfo?.birthDate ? getLunarBirthYear(userInfo.birthDate) : NaN;   // năm ÂM LỊCH, khớp phần phong thủy
+  const birthYearTxt = isNaN(lunarBY) ? 'chưa nhập' : `${lunarBY} ${getCanChi(lunarBY)} (âm lịch)`;
   const gender = userInfo?.gender || 'nam';
-  const desiredDirection = userInfo?.desiredDirection || 'Nam';
+  const desiredDirection = userInfo?.desiredDirection || '';         // không tự gán hướng khi khách chưa chọn
   const dim = planDimsFor(constructionInfo) || '10x18.6';
   const floors = Math.max(1, constructionInfo?.floors || 1);
   const userBudget = constructionInfo?.totalBudget;
@@ -269,8 +271,8 @@ export async function exportSpecificationToPdf({
         <div class="section-title">4. Định Hướng Phong Thủy Bát Trạch & Thước Lỗ Ban 52.2cm</div>
         <div class="card-blue">
           <div class="grid-2" style="margin-bottom:2px;">
-            <div><b>Gia chủ:</b> ${clientName} (Năm sinh: ${birthYear} - Giới tính: ${gender.toUpperCase()})</div>
-            <div><b>Hướng đất:</b> <span style="color:#0284c7; font-weight:700;">${desiredDirection}</span></div>
+            <div><b>Gia chủ:</b> ${clientName} (Năm sinh: ${birthYearTxt} - Giới tính: ${gender.toUpperCase()})</div>
+            <div><b>Hướng đất:</b> <span style="color:#0284c7; font-weight:700;">${desiredDirection || 'Chưa chọn'}</span></div>
           </div>
           <div style="font-size:8.5px; color:#1e293b; line-height:1.35;">
             • <b>Cửa chính (Minh Đường):</b> Rộng 810mm × Cao 2120mm (Cung Tiến Bảo / Phú Quý).<br/>
