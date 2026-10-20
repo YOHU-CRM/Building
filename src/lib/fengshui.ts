@@ -56,6 +56,22 @@ export function getCanChi(year: number): string {
   return `${CAN[((year - 4) % 10 + 10) % 10]} ${CHI[((year - 4) % 12 + 12) % 12]}`;
 }
 
+/** Năm sinh vợ/chồng ĐƯỢC PHÉP dùng để tính: chỉ khi ô nhập đang hiển thị (gói Đầy đủ / Bản vẽ) và là năm hợp lệ.
+ *  Ô bị ẩn → không dùng dữ liệu cũ còn sót lại (tránh "giao diện không có tuổi vợ nhưng kết quả vẫn có"). */
+export function spouseYearOf(info: any, spouseFieldVisible: boolean): number | undefined {
+  if (!spouseFieldVisible || !info) return undefined;
+  const y = Number(info.spouseBirthYear);
+  return Number.isInteger(y) && y >= 1920 && y <= 2050 ? y : undefined;
+}
+/** Bản userInfo chỉ gồm những gì khách đang thấy trên giao diện (bỏ tuổi vợ/chồng khi ô bị ẩn) */
+export function visibleUserInfo<T extends Record<string, any>>(info: T, spouseFieldVisible: boolean): T {
+  if (!info) return info;
+  const y = spouseYearOf(info, spouseFieldVisible);
+  const out: any = { ...info, spouseBirthYear: y };
+  if (!y) delete out.spouseGender;
+  return out;
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * ÂM LỊCH VIỆT NAM (thuật toán Hồ Ngọc Đức, múi giờ +7)
  * ══════════════════════════════════════════════════════════════════ */
