@@ -2847,6 +2847,29 @@ function parseJsonSafe(text: string): any {
   }
 }
 
+/** Mô tả ghi RÕ "mặt tiền (mặt ngang) rộng X m" và "chiều sâu Y m" → đó là kích thước đúng, bất kể thứ tự "AxB" */
+function frontDepthFromText(desc: string): { front: number; depth: number } | null {
+  const t = String(desc || '').toLowerCase().replace(/,(\d)/g, '.$1');
+  const num = '(\\d+(?:\\.\\d+)?)\\s*m';
+  const f = t.match(new RegExp(`(?:mặt tiền|mặt ngang|chiều ngang|bề ngang)[^\\d.;\\n]{0,25}?${num}`));
+  const d = t.match(new RegExp(`(?:chiều sâu|sâu|chiều dài|bề dài)[^\\d.;\\n]{0,15}?${num}`));
+  const front = f ? parseFloat(f[1]) : NaN, depth = d ? parseFloat(d[1]) : NaN;
+  return front > 0 && depth > 0 && front < 200 && depth < 200 ? { front, depth } : null;
+}
+function applyFrontDepth(data: any, desc: string) {
+  const fd = frontDepthFromText(desc);
+  if (!data || !fd) return data;
+  const note = `Theo mô tả: mặt tiền rộng ${fd.front}m, chiều sâu ${fd.depth}m — tool vẽ đúng chiều này.`;
+  if (data.kich_thuoc_dat && !data.kich_thuoc_nha) {
+    data.kich_thuoc_dat = { ...data.kich_thuoc_dat, rong_truoc: fd.front, rong_sau: fd.front, dai: fd.depth };
+  } else {
+    data.kich_thuoc_nha = { ...(data.kich_thuoc_nha || {}), rong: fd.front, dai: fd.depth, nguon: 'mo_ta' };
+  }
+  data.dien_tich = `${fd.front}x${fd.depth}`;
+  data.canh_bao = [...(Array.isArray(data.canh_bao) ? data.canh_bao : []), note];
+  return data;
+}
+
 function fallbackExtractFromDescription(desc: string) {
   const lower = desc.toLowerCase();
   let so_tang = 2;
@@ -2877,7 +2900,7 @@ function fallbackExtractFromDescription(desc: string) {
     so_phong_ngu: (() => { const m = desc.match(/(\d+)\s*(phòng ngủ|pn\b)/i); return m ? parseInt(m[1]) : 0; })(),
     so_wc: (() => { const m = desc.match(/(\d+)\s*(wc|vệ sinh|toilet)/i); return m ? parseInt(m[1]) : 0; })(),
     phong_tho: lower.includes("phòng thờ") || lower.includes("thờ"),
-    gara: lower.includes("gara") || lower.includes("ô tô") ? "oto" : "xe_may",
+    gara: /gara|ga ra|ô tô|oto|xe hơi/.test(lower) ? "oto" : "",
     loai_dat: lower.includes("đất yếu") || lower.includes("ao") && lower.includes("lấp") ? "yeu" : lower.includes("đất cát") ? "cat" : "chua_biet",
     // Số đo khách gõ = KÍCH THƯỚC NHÀ XÂY, trừ khi ngay trước đó ghi "đất / thửa / sổ đỏ / lô đất"
     ...(() => {
@@ -2991,7 +3014,7 @@ QUY TẮC ƯU TIÊN:
    (9) "loi_vao": khách từ đường đi vào phía nào ("canh") và bắt đầu từ đoạn nào ("tu"). "ngoai_nha": công trình / khu ngoài nhà và phía của nó (ở Việt Nam đất rộng hay có bếp phụ đun củi, giếng, ao, vườn).
    (10) Chữ nào không đọc được: đoán gần nhất, "tin_cay" < 0.6 và ghi nguyên văn nét đó vào "doc_khong_ro". TUYỆT ĐỐI không thêm phòng không có trên bản vẽ.
 0d. "do_tin_cay": 0–1 cho mức chắc chắn của từng trường (chữ mờ, nét vẽ không rõ → dưới 0.6). Trường nào dưới 0.7 phải ghi lý do vào "canh_bao".
-1. MÔ TẢ VĂN BẢN CỦA GIA CHỦ LÀ YÊU CẦU CAO NHẤT. Số đo gia chủ gõ (vd "5x20", "nhà 8x12") là KÍCH THƯỚC NHÀ CẦN XÂY → "kich_thuoc_nha" (nguon "mo_ta"), trừ khi gia chủ ghi rõ là đất/thửa/sổ đỏ. Số tầng, số phòng, phong cách, vật liệu trong mô tả được ưu tiên hơn mọi ảnh.
+1. MÔ TẢ VĂN BẢN CỦA GIA CHỦ LÀ YÊU CẦU CAO NHẤT. Số đo gia chủ gõ (vd "5x20", "nhà 8x12") là KÍCH THƯỚC NHÀ CẦN XÂY → "kich_thuoc_nha" (nguon "mo_ta"), trừ khi gia chủ ghi rõ là đất/thửa/sổ đỏ. Số tầng, số phòng, phong cách, vật liệu trong mô tả được ưu tiên hơn mọi ảnh. Nếu mô tả ghi rõ "mặt tiền / mặt ngang rộng X m" và "chiều sâu Y m" thì rong = X, dai = Y (bất kể thứ tự số trong "AxB"). "gara": chỉ ghi "oto" khi mô tả hoặc bản vẽ có gara / chỗ đỗ ô tô; không nhắc thì để "".
 2. Sổ đỏ: chỉ cho "kich_thuoc_dat", địa chỉ, hướng đất. Không dùng kích thước đất làm kích thước nhà.
 3. Bản vẽ tay / ảnh: chỉ là THAM CHIẾU cách bố trí không gian và kiểu dáng. Nếu mô tả không có số đo nhà mà bản vẽ ghi số đo nhà → "kich_thuoc_nha" (nguon "ban_ve"). Khi bản vẽ mâu thuẫn mô tả: theo mô tả, ghi mâu thuẫn vào "canh_bao".
 Nếu trường nào không tìm thấy thông tin, để trống ("") hoặc giá trị mặc định (so_tang: 1, so_mat_tien: 1, loai_ket_cau_chinh: "Bê tông cốt thép truyền thống"). TUYỆT ĐỐI KHÔNG TỰ BỊA SỐ LIỆU.`;
@@ -3019,12 +3042,13 @@ Nếu trường nào không tìm thấy thông tin, để trống ("") hoặc gi
     if (!parsedData) {
       parsedData = fallbackExtractFromDescription(description);
     }
+    parsedData = applyFrontDepth(parsedData, description);
 
     res.json({ ok: true, data: parsedData });
   } catch (err: any) {
     console.error("Error extracting project info:", err);
     // Return graceful fallback instead of 500 error
-    res.json({ ok: true, data: fallbackExtractFromDescription(req.body.description || "") });
+    res.json({ ok: true, data: applyFrontDepth(fallbackExtractFromDescription(req.body.description || ""), req.body.description || "") });
   }
 });
 
