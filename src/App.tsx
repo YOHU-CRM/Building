@@ -512,7 +512,8 @@ export default function App() {
         workRoom: false,
         bathroomCount: 2,
         dryingYard: true,
-        parkingType: 'garage',
+        parkingType: 'yard',
+        garage: false,
         garden: false,
         fishPond: false,
         swimmingPool: false,
@@ -1520,7 +1521,8 @@ export default function App() {
         ...(Number(data.so_phong_ngu) > 0 ? { bedroomCount: Number(data.so_phong_ngu) } : {}),
         ...(Number(data.so_wc) > 0 ? { bathroomCount: Number(data.so_wc) } : {}),
         ...(typeof data.phong_tho === 'boolean' ? { worshipRoom: data.phong_tho } : {}),
-        ...(data.gara ? { parkingType: data.gara === 'oto' ? 'garage' : data.gara === 'khong' ? 'none' : 'yard' } : {}),
+        // Gara: ô tích trên giao diện là nguồn đúng — mô tả có "gara/ô tô" thì TÍCH ô cho khách thấy; không nhắc thì giữ nguyên lựa chọn của khách
+        ...(data.gara === 'oto' ? { garage: true, parkingType: 'garage' } : data.gara === 'khong' ? { garage: false, parkingType: 'none' } : {}),
         // Bố trí theo phác thảo tay (bộ vẽ mặt bằng đọc trường này)
         sketchLayout: data.bo_tri_phac_thao && Array.isArray(data.bo_tri_phac_thao.tang) && data.bo_tri_phac_thao.tang.length ? data.bo_tri_phac_thao : (prev.rooms || {}).sketchLayout
       },
@@ -3961,7 +3963,7 @@ ${goi === 'design' ? `
                               <label className="flex items-center gap-2.5 cursor-pointer py-1.5">
                                 <input 
                                   type="checkbox" 
-                                  checked={constructionInfo.rooms.garage} 
+                                  checked={constructionInfo.rooms.garage === true} 
                                   onChange={(e) => setConstructionInfo({
                                     ...constructionInfo, 
                                     rooms: { ...constructionInfo.rooms, garage: e.target.checked }
