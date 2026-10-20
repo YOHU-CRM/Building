@@ -30,7 +30,7 @@ export function listRoomSlots(ct: any): RoomSlot[] {
   for (let i = 1; i <= beds; i++) out.push({ key: `ngu_${i}`, loai: 'ngu', label: `Phòng ngủ ${i}`, defaultTang: floors === 1 ? 1 : Math.min(floors, 2 + Math.floor((i - 1) / 2)) });
   const wcs = Math.max(0, Math.round(Number(r.bathroomCount) || 0));
   for (let i = 1; i <= wcs; i++) out.push({ key: `wc_${i}`, loai: 'wc', label: `WC ${i}`, defaultTang: Math.min(floors, i) });
-  if (r.garage || (r.garage === undefined && r.parkingType === 'garage')) out.push({ key: 'gara', loai: 'gara', label: 'Gara ô tô', defaultTang: 1 });
+  if (r.garage === true) out.push({ key: 'gara', loai: 'gara', label: 'Gara ô tô', defaultTang: 1 });
   return out;
 }
 
