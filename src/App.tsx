@@ -82,7 +82,7 @@ const ElevationViewer = React.lazy(() => import("./components/ElevationViewer"))
 import { ProjectIntakeUploader } from "./components/ProjectIntakeUploader";
 const SpecificationReportModal = React.lazy(() => import("./components/SpecificationReportModal").then(m => ({ default: m.SpecificationReportModal })));
 import { STRUCTURAL_OPTIONS } from "./data/structuralOptions";
-import { calculateFengShui, translateFengShuiAnalysis, getLunarBirthYear, getDefaultConstructionYear, getCanChi } from "./lib/fengshui";
+import { calculateFengShui, translateFengShuiAnalysis, getLunarBirthYear, getDefaultConstructionYear, getCanChi, spouseYearOf, visibleUserInfo } from './lib/fengshui';
 import { callGas, fetchVerifiedPackage, adminActivatePackage } from "./lib/gasClient";
 import { PaymentRequestModal } from "./components/PaymentRequestModal";
 import { SiteConditionsPanel } from "./components/SiteConditionsPanel";
@@ -822,6 +822,16 @@ export default function App() {
     }
   }, [lang]);
 
+  // Đổi gói làm ẩn/hiện ô tuổi vợ/chồng → tính lại phong thủy để kết quả khớp đúng những gì đang hiển thị
+  const spouseVisibleRef = useRef(goiKichHoat !== 'free');
+  useEffect(() => {
+    const vis = goiKichHoat !== 'free';
+    if (vis === spouseVisibleRef.current) return;
+    spouseVisibleRef.current = vis;
+    if (fengShuiAnalysis && (userInfo as any)?.spouseBirthYear) computeLocalFengshui();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goiKichHoat]);
+
   // Pre-configured questions inside feng shui playground
   const suggestions = t.suggestions;
 
@@ -837,8 +847,8 @@ export default function App() {
       year,
       activeInfo.gender || 'nam',
       activeInfo.desiredDirection,
-      activeInfo.spouseBirthYear ? Number(activeInfo.spouseBirthYear) : undefined,
-      activeInfo.spouseGender,
+      spouseYearOf(activeInfo, goiKichHoatRef.current !== 'free'),
+      spouseYearOf(activeInfo, goiKichHoatRef.current !== 'free') ? activeInfo.spouseGender : undefined,
       activeInfo.birthHour,
       activeInfo.constructionYear ? Number(activeInfo.constructionYear) : undefined
     );
@@ -1740,9 +1750,15 @@ export default function App() {
 
   // Calls Gemini API to scan classical scriptures and output specialized feng shui responses
   const triggerFengshuiExport = async () => {
-    // Generate clean smart default if they didn't fill, to prevent blocking or uncalculated states
-    const finalName = userInfo.name?.trim() || "Khách Hàng Mới";
-    const finalBirthDate = userInfo.birthDate || "1990-01-01";
+    // Không tự điền tên / ngày sinh giả — thiếu thì nhắc khách nhập ở Bước A
+    if (!userInfo.name?.trim() || !userInfo.birthDate) {
+      setMissingAlert("A");
+      setCurrentStep("A");
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const finalName = userInfo.name.trim();
+    const finalBirthDate = userInfo.birthDate;
     const finalGender = userInfo.gender || "nam";
 
     const updatedUserInfo = {
@@ -1762,7 +1778,7 @@ export default function App() {
       const res = await fetch("/api/fengshui/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userInfo: updatedUserInfo, lang })
+        body: JSON.stringify({ userInfo: visibleUserInfo(updatedUserInfo, goiKichHoatRef.current !== 'free'), lang })
       });
       if (!res.ok) throw new Error("API status down");
       const result = await res.json();
@@ -1820,14 +1836,20 @@ export default function App() {
 
   // Calls Gemini to formulate full project schedule & budget metrics
   const triggerCoreResultExport = async () => {
+    // Không tự điền tên / ngày sinh giả — thiếu thì nhắc khách nhập ở Bước A (kiểm tra TRƯỚC khi trừ lượt AI)
+    if (!userInfo.name?.trim() || !userInfo.birthDate) {
+      setMissingAlert("A");
+      setCurrentStep("A");
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     // Credit check & deduction
     if (!consumeAiCredit("Tính toán dự toán AI")) {
       return;
     }
 
-    // Automatically set default Name and Birth Date if empty to prevent blocking
-    const activeName = userInfo.name?.trim() || "Khách Hàng Mới";
-    const activeBirthDate = userInfo.birthDate || "1990-01-01";
+    const activeName = userInfo.name.trim();
+    const activeBirthDate = userInfo.birthDate;
     const activeGender = userInfo.gender || "nam";
 
     const updatedUserInfo = {
@@ -1879,7 +1901,7 @@ export default function App() {
       const res = await fetch("/api/construction/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userInfo: updatedUserInfo, constructionInfo: finalizedConstructionInfo, detailItems, lang })
+        body: JSON.stringify({ userInfo: visibleUserInfo(updatedUserInfo, goiKichHoatRef.current !== 'free'), constructionInfo: finalizedConstructionInfo, detailItems, lang })
       });
       if (!res.ok) throw new Error("Estimation server error");
       const data = await res.json();
@@ -2244,7 +2266,12 @@ export default function App() {
       const ten = kh?.name || t.pdf.defaultClientName;
       const ngay = new Date().toLocaleDateString(t.locale);
       const lunarBY = kh?.birthDate ? getLunarBirthYear(kh.birthDate) : NaN;
-      const birthYear = isNaN(lunarBY) ? 1979 : lunarBY;
+      if (isNaN(lunarBY)) {          // không tự điền năm sinh giả — bắt buộc khách nhập
+        alert(lang === 'vi' ? 'Chưa có ngày sinh gia chủ. Vui lòng nhập ở Bước A rồi xuất PDF lại.' : 'Owner birth date is missing. Please fill it in Step A, then export again.');
+        setAiLoading(false);
+        return;
+      }
+      const birthYear = lunarBY;
       const gender = kh?.gender || 'nam';
       const desiredDirection = kh?.desiredDirection || '';
       const targetYearPdf = kh?.constructionYear ? Number(kh.constructionYear) : getDefaultConstructionYear();
@@ -2256,8 +2283,8 @@ export default function App() {
           birthYear,
           gender,
           desiredDirection,
-          kh?.spouseBirthYear ? Number(kh.spouseBirthYear) : undefined,
-          kh?.spouseGender,
+          spouseYearOf(kh, goi !== 'free'),
+          spouseYearOf(kh, goi !== 'free') ? kh?.spouseGender : undefined,
           kh?.birthHour,
           targetYearPdf
         );
@@ -2934,7 +2961,10 @@ ${goi === 'design' ? `
       const existingLead = leads.find((l: any) => l.userInfo?.phone === authPhone);
       if (existingLead) {
         if (existingLead.id) setClientId(existingLead.id);
-        const restoredUserInfo = existingLead.userInfo ? { ...userInfo, ...existingLead.userInfo, phone: authPhone } : { ...userInfo, phone: authPhone };
+        // Hồ sơ cũ thay HẲN dữ liệu đang có (không trộn tuổi vợ/chồng, hướng… của hồ sơ khác); chỉ giữ xác nhận đồng ý vừa tick
+        const restoredUserInfo = existingLead.userInfo
+          ? { ...existingLead.userInfo, phone: authPhone, consentAt: (existingLead.userInfo as any).consentAt || (userInfo as any).consentAt }
+          : { ...userInfo, phone: authPhone };
         setUserInfo(restoredUserInfo);
         if (existingLead.constructionInfo) setConstructionInfo(prev => ({ ...prev, ...existingLead.constructionInfo }));
         if (existingLead.detailItems) setDetailItems(prev => ({ ...prev, ...existingLead.detailItems }));
