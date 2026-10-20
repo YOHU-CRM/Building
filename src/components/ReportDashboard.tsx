@@ -162,7 +162,7 @@ export default function ReportDashboard({
                <h4 className="font-bold text-[14.5px] lg:text-sm mb-1 text-emerald-700">💰 Lời khuyên tài chính từ Chuyên gia</h4>
                <p className="text-[13px] lg:text-xs leading-relaxed text-slate-600">
                   {aiReport.priceSource
-                    ? <>Tổng dự toán <b>{formatCurrency(aiReport.totalBoqCost || 0, lang)}</b> ({aiReport.priceSource.optionName}, suất {formatCurrency(aiReport.priceSource.perM2 || 0, lang)}/m², {aiReport.priceSource.floorAreaConverted} m² sàn quy đổi, {aiReport.priceSource.region}). {aiReport.priceSource.note}</>
+                    ? <>Tổng dự toán <b>{formatCurrency(aiReport.totalBoqCost || 0, lang)}</b> ({aiReport.priceSource.optionName}, {aiReport.priceSource.region}) — tương đương <b>{formatCurrency(aiReport.priceSource.perM2Usable || 0, lang)}/m² sàn sử dụng</b> ({aiReport.priceSource.floorAreaReal} m²) hoặc <b>{formatCurrency(aiReport.priceSource.perM2 || 0, lang)}/m² quy đổi</b> ({aiReport.priceSource.floorAreaConverted} m²). {aiReport.priceSource.note}</>
                     : 'Danh mục ưu tiên vật liệu bền vững tại địa phương để giảm chi phí vận chuyển mà vẫn đảm bảo tiêu chuẩn kỹ thuật.'}
                   {aiReport.budgetCheck && (
                     <span className={`block mt-1.5 font-bold ${aiReport.budgetCheck.ok ? 'text-emerald-600' : 'text-rose-600'}`}>{aiReport.budgetCheck.ok ? '✅ ' : '⚠️ '}{aiReport.budgetCheck.text}</span>
@@ -280,6 +280,35 @@ export default function ReportDashboard({
                       <div><div className="text-[11px] uppercase font-bold text-slate-500">Phần vật tư, thiết bị</div><div className="font-mono font-black text-emerald-500">{formatCurrency(aiReport.priceSource.totalMaterial || 0, lang)}</div></div>
                       <div><div className="text-[11px] uppercase font-bold text-slate-500">Phần nhân công (khoán)</div><div className="font-mono font-black text-amber-500">{formatCurrency(aiReport.priceSource.totalLabor || 0, lang)}</div></div>
                     </div>
+                    {/* 3 cách tính giá theo m² — cùng 1 bộ diện tích lấy từ mặt bằng */}
+                    {Array.isArray(aiReport.priceSource.methods) && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        {aiReport.priceSource.methods.map((m: any) => (
+                          <div key={m.key} className={`p-2.5 rounded-lg border ${!m.applicable ? 'opacity-60 border-dashed' : ''} ${theme === 'dark' ? 'border-slate-700' : 'border-slate-200 bg-white'}`}>
+                            <div className="text-[11px] uppercase font-bold text-slate-500">{m.title}</div>
+                            {m.applicable ? (
+                              <>
+                                <div className="font-mono text-[13px] mt-0.5">{m.area} {m.areaLabel} × <b>{formatCurrency(m.rate, lang)}</b>/m²</div>
+                                <div className={`font-mono font-black ${m.key === 'su_dung' ? 'text-sky-600' : m.key === 'quy_doi' ? 'text-violet-600' : 'text-emerald-600'}`}>= {formatCurrency(m.total, lang)}</div>
+                                {m.key === 'xay_dung' && <div className="text-[11px] font-bold text-amber-600">{m.source === 'cong_ty' ? 'Đơn giá khoán của công ty' : 'Chưa có đơn giá khoán công ty — tạm suy từ bóc tách'}</div>}
+                              </>
+                            ) : <div className="text-xs font-bold text-slate-500 mt-1">Không áp dụng cho công trình này</div>}
+                            <div className="text-[11px] text-slate-500 mt-1 leading-snug">{m.note}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(aiReport.priceSource.quyDoiDetail) && aiReport.priceSource.quyDoiDetail.length > 0 && (
+                      <table className="w-full text-[11px] sm:text-xs">
+                        <thead><tr className="text-slate-500 text-left"><th className="py-1">Phần tính quy đổi</th><th className="text-right">Diện tích</th><th className="text-right">Hệ số</th><th className="text-right">Quy đổi</th></tr></thead>
+                        <tbody>
+                          {aiReport.priceSource.quyDoiDetail.map((l: any, i: number) => (
+                            <tr key={i} className="border-t border-slate-200/60"><td className="py-1">{l.label}</td><td className="text-right font-mono">{l.area} m²</td><td className="text-right font-mono">{l.pct}%</td><td className="text-right font-mono">{l.converted} m²</td></tr>
+                          ))}
+                          <tr className="border-t border-slate-300 font-bold"><td className="py-1">Tổng diện tích quy đổi</td><td /><td /><td className="text-right font-mono">{aiReport.priceSource.floorAreaConverted} m²</td></tr>
+                        </tbody>
+                      </table>
+                    )}
                     {Array.isArray(aiReport.priceSource.yeuCau) && aiReport.priceSource.yeuCau.length > 0 && (
                       <div>
                         <div className="font-black mb-1">✅ Yêu cầu của gia chủ đã đưa vào dự toán</div>

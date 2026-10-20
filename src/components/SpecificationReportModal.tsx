@@ -28,7 +28,7 @@ import {
 } from '../data/boqStandards';
 import { exportSpecificationToPdf } from '../lib/specificationPdfExporter';
 import { StructuralOptionKey } from '../lib/boqEngine';
-import { getUnifiedEstimate } from '../lib/unifiedPricing';
+import { getUnifiedEstimate, priceMethods } from '../lib/unifiedPricing';
 import { generateArchitecturalFloorPlanSvg } from '../lib/architecturalFloorPlan';
 import { computeArchitecturalLayoutModel } from '../lib/architecturalLayoutModel';
 import { formatSectionContentToHtml, cleanAndNormalizeVietnameseText, cleanMarkdownForPlainText } from '../lib/documentFormatter';
@@ -102,9 +102,12 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
 
   const dim = planDimsFor(constructionInfo) || "100m²";
   const floors = constructionInfo?.floors || 2;
-  const { groundArea, totalArea, widthM, lengthM } = parseFloorArea(dim);
-  const sGround = groundArea;
-  const sTotal = totalArea * (floors / 2);
+  const { widthM, lengthM } = parseFloorArea(dim);
+  // MỘT bộ số liệu diện tích với màn hình kết quả, PDF, CRM: lấy từ bộ tính giá chung (diện tích theo mặt bằng tool vẽ)
+  const unifiedEst = getUnifiedEstimate({ constructionInfo, userInfo, optionKey: (selectedOptionId as StructuralOptionKey) || 'PA1' });
+  const sGround = unifiedEst.dien_tich_xay_dung;       // diện tích xây dựng (phần nhà chiếm đất)
+  const sTotal = unifiedEst.dien_tich_san;             // tổng sàn sử dụng các tầng
+  const methods3 = priceMethods(unifiedEst);
 
   // Generate architectural floor plan SVG for direct visual preview & embedding
   const floorPlanSvg = generateArchitecturalFloorPlanSvg({
@@ -649,7 +652,7 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
         <!-- COMMITMENT & 24H NOTICE -->
         <div class="commitment-box">
           <b>⚡ CAM KẾT KỸ THUẬT &amp; ĐÍNH CHÍNH BẢN VẼ CHI TIẾT 24H:</b><br/>
-          Sơ đồ và phân khu chức năng trong tài liệu này được tính toán chuẩn theo diện tích thực tế <b>${sGround} m² (${widthM || 8}m x ${lengthM || 15}m)</b> của Quý khách. Hồ sơ bản vẽ kỹ thuật thi công hoàn chỉnh (AutoCAD kiến trúc, kết cấu móng-cột-dầm-sàn, bản vẽ điện nước MEP) sẽ được <b>Đội ngũ kỹ sư thẩm định và bàn giao trong vòng 24 giờ làm việc</b>.
+          Sơ đồ và phân khu chức năng trong tài liệu này được tính theo diện tích xây dựng <b>${sGround} m² (${widthM || 8}m x ${lengthM || 15}m)</b> của Quý khách. Hồ sơ bản vẽ kỹ thuật thi công hoàn chỉnh (AutoCAD kiến trúc, kết cấu móng-cột-dầm-sàn, bản vẽ điện nước MEP) sẽ do đội ngũ kỹ sư thẩm định và lập khi ký hợp đồng thiết kế.
         </div>
 
         <!-- FORMAL SIGNATURE BLOCK -->
@@ -1333,7 +1336,7 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                                     totalConstructionArea: sTotal
                                   });
                                   const boqList = getBoqTemplateForOption(selectedOptionId);
-                                  const { totalCostVND } = calculateFullBOQ(boqList, sGround, sTotal, floors, layout, userInfo?.address);
+                                  void boqList; void layout; const totalCostVND = unifiedEst.tong_tron_goi;   // cùng tổng với dự toán chuẩn
                                   const milestones = calculateCashflowMilestones(totalCostVND, selectedOptionId);
 
                                   return milestones.map((ms) => (
@@ -1448,7 +1451,7 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                               <span>⚡ CAM KẾT KỸ THUẬT &amp; ĐÍNH CHÍNH BẢN VẼ CHI TIẾT 24H:</span>
                             </div>
                             <p className="leading-relaxed text-amber-900">
-                              Sơ đồ phân khu công năng trên được tính toán khớp với diện tích mặt bằng thực tế <b>{sGround} m² ({widthM || 8}m × {lengthM || 15}m)</b> của Quý khách. Hồ sơ bản vẽ kỹ thuật thi công hoàn chỉnh (AutoCAD kiến trúc, kết cấu móng-cột-dầm-sàn, bản vẽ điện nước MEP) sẽ được <b>Đội ngũ kỹ sư thẩm định, hoàn thiện chính xác 100% và bàn giao trong vòng 24 giờ làm việc</b>.
+                              Sơ đồ phân khu công năng trên được tính theo diện tích xây dựng <b>{sGround} m² ({widthM || 8}m × {lengthM || 15}m)</b> của Quý khách. Hồ sơ bản vẽ kỹ thuật thi công hoàn chỉnh (AutoCAD kiến trúc, kết cấu móng-cột-dầm-sàn, bản vẽ điện nước MEP) sẽ do đội ngũ kỹ sư thẩm định và lập khi ký hợp đồng thiết kế.
                             </p>
                           </div>
                         </div>
@@ -1627,9 +1630,10 @@ export const SpecificationReportModal: React.FC<SpecificationReportModalProps> =
                           <div className="p-4 bg-amber-950/40 border border-amber-500/30 rounded-xl text-xs text-amber-200 space-y-2 leading-relaxed">
                             <strong className="text-amber-300 uppercase block tracking-wide">📐 GIẢI TRÌNH DIỆN TÍCH THI CÔNG CHI TIẾT (Tránh hiểu nhầm về hao hụt diện tích):</strong>
                             <ul className="list-disc pl-4 space-y-1 text-slate-300">
-                              <li><b>Diện tích sàn sử dụng thực tế (thông thủy sàn trệt):</b> <span className="text-white font-bold">{sGround} m²</span> (Toàn bộ phần diện tích sử dụng bên trong các phòng chức năng sinh hoạt hàng ngày).</li>
-                              <li><b>Diện tích quy đổi kết cấu móng &amp; hạ tầng kỹ thuật (Hệ số quy đổi 30%):</b> <span className="text-white font-bold">{(sGround * 0.3).toFixed(1)} m²</span> (Quy đổi chi phí đào đắp móng, bê tông lót, bê tông móng băng/móng cọc ngầm, cốp pha ngầm và hệ thống bể tự hoại bảo vệ nền nhà không lún lệch).</li>
-                              <li><b>Tổng diện tích sàn tính toán dự toán (BOQ trọn gói):</b> {sGround} m² + {(sGround * 0.3).toFixed(1)} m² = <span className="text-yellow-300 font-bold">{Math.round(sTotal)} m²</span>. Đây là diện tích chuẩn được áp dụng để tính toán chính xác tuyệt đối định mức vật liệu &amp; nhân công, đảm bảo tính minh bạch tối đa cho Chủ đầu tư.</li>
+                              <li><b>Diện tích xây dựng (phần nhà chiếm đất):</b> <span className="text-white font-bold">{sGround} m²</span> · <b>Sàn sử dụng các tầng:</b> <span className="text-white font-bold">{sTotal} m²</span> · <b>Quy đổi:</b> <span className="text-white font-bold">{unifiedEst.dien_tich_quy_doi} m²</span> ({unifiedEst.quy_doi_chi_tiet.map(l => `${l.label} ${l.area}m² × ${l.pct}%`).join(' + ')}).</li>
+                              {methods3.map(m => (
+                                <li key={m.key}><b>{m.title}:</b> {m.applicable ? <>{m.area} {m.areaLabel} × {Math.round(m.rate).toLocaleString('vi-VN')} đ/m² = <span className="text-yellow-300 font-bold">{Math.round(m.total).toLocaleString('vi-VN')} đ</span>. </> : null}{m.note}</li>
+                              ))}
                             </ul>
                           </div>
 
