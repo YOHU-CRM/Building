@@ -624,6 +624,9 @@ export interface FullProjectEstimateResult {
   dien_tich_xay_dung: number;       // phần nhà chiếm đất
   dien_tich_quy_doi: number;        // sàn + móng + mái quy đổi (để so sánh báo giá)
   he_so_quy_doi: { mong: number; mai: number };
+  quy_doi_chi_tiet: QuyDoiLine[];   // bảng tính diện tích quy đổi (từng phần × hệ số)
+  dien_tich_hien: number;
+  suat_san_su_dung_m2: number;      // tổng trọn gói ÷ m² sàn sử dụng
   nen_mong: FoundationDecision;
   loai_mai_tinh: RoofKind;
   so_tang: number;
@@ -801,6 +804,19 @@ export function decideFoundation(optionKey: StructuralOptionKey, soilRaw: string
   return { soil, foundation, reason, pile: { needed, caps, perCap, count, lengthM, meters: count * lengthM } };
 }
 
+/* ══ HỆ SỐ DIỆN TÍCH QUY ĐỔI (cách nhà thầu VN báo giá theo m²) — Admin chỉnh được, đơn vị % ══ */
+export interface QuyDoiCoefficients { mong_bang: number; mong_coc: number; mong_be: number; mai_ton: number; mai_btct: number; mai_ngoi: number; mai_thai: number; hien: number }
+export const DEFAULT_QUY_DOI: QuyDoiCoefficients = { mong_bang: 50, mong_coc: 40, mong_be: 60, mai_ton: 30, mai_btct: 50, mai_ngoi: 70, mai_thai: 70, hien: 50 };
+let QUY_DOI: QuyDoiCoefficients = { ...DEFAULT_QUY_DOI };
+/** Cập nhật hệ số từ cài đặt Admin (giá trị % 0–300; trường sai bỏ qua) */
+export function setQuyDoiCoefficients(o: Partial<QuyDoiCoefficients> | null | undefined) {
+  const next = { ...DEFAULT_QUY_DOI };
+  (Object.keys(DEFAULT_QUY_DOI) as (keyof QuyDoiCoefficients)[]).forEach(k => { const v = Number((o as any)?.[k]); if (o && (o as any)[k] !== undefined && isFinite(v) && v >= 0 && v <= 300) next[k] = Math.round(v); });
+  QUY_DOI = next;
+}
+export const getQuyDoiCoefficients = (): QuyDoiCoefficients => ({ ...QUY_DOI });
+export interface QuyDoiLine { label: string; area: number; pct: number; converted: number }
+
 /**
  * Master Pricing Calculator
  */
@@ -823,6 +839,8 @@ export function calculateMasterProjectEstimate(params: {
   yeuCau?: CustomerChoices;   // các lựa chọn vật tư / kỹ thuật gia chủ đã chọn
   floorHeight1?: number;      // chiều cao tầng 1 (m) gia chủ nhập — mặc định 3,6
   floorHeightUpper?: number;  // chiều cao các tầng trên (m) — mặc định 3,3
+  san_tang?: number[];        // diện tích sàn sử dụng TỪNG TẦNG lấy từ mặt bằng (tầng trên có thể nhỏ hơn tầng 1)
+  dien_tich_hien?: number;    // hiên có mái, ban công (m²) — tính quy đổi theo hệ số hiên
 }): FullProjectEstimateResult {
   const optionKey: StructuralOptionKey = params.optionKey || 'PA1';
   const packageKey: FinishingPackageKey = params.packageKey || 'tieu_chuan';
@@ -848,12 +866,23 @@ export function calculateMasterProjectEstimate(params: {
   // ── Nền đất, móng, mái ──
   const nenMong = decideFoundation(optionKey, params.soilType, so_tang, dien_tich_xay_dung, params.widthM, params.houseLengthM);
   const roof = normalizeRoof(params.roofType, so_tang);
-  const K_MONG = { bang: 0.3, coc: 0.4, be: 0.5 }[nenMong.foundation];
-  const K_MAI = { ton: 0.3, ngoi: 0.7, btct: 0.5, thai_nhat: 0.7 }[roof];
-  // Sàn thực = diện tích xây dựng × số tầng (giá móng & mái đã có hạng mục riêng)
-  const dien_tich_san = params.dien_tich_san || Math.round(dien_tich_xay_dung * so_tang * 10) / 10;
-  // Diện tích quy đổi theo cách nhà thầu VN hay báo giá (để khách so sánh): sàn + móng + mái
-  const dien_tich_quy_doi = Math.round(dien_tich_xay_dung * (so_tang + K_MONG + K_MAI) * 10) / 10;
+  const K_MONG = ({ bang: QUY_DOI.mong_bang, coc: QUY_DOI.mong_coc, be: QUY_DOI.mong_be }[nenMong.foundation]) / 100;
+  const K_MAI = ({ ton: QUY_DOI.mai_ton, ngoi: QUY_DOI.mai_ngoi, btct: QUY_DOI.mai_btct, thai_nhat: QUY_DOI.mai_thai }[roof]) / 100;
+  const K_HIEN = QUY_DOI.hien / 100;
+  const r1q = (n: number) => Math.round(n * 10) / 10;
+  // Sàn sử dụng: theo mặt bằng từng tầng nếu có (tầng trên nhỏ hơn / phần nhô chỉ ở tầng 1), không thì diện tích xây dựng × số tầng
+  const sanTang = Array.isArray(params.san_tang) && params.san_tang.length && params.san_tang.every(v => v > 0) ? params.san_tang.map(r1q) : null;
+  const dien_tich_san = sanTang ? r1q(sanTang.reduce((a, b) => a + b, 0)) : (params.dien_tich_san || r1q(dien_tich_xay_dung * so_tang));
+  const dien_tich_hien = Math.max(0, r1q(Number(params.dien_tich_hien) || 0));
+  const dt_mai = sanTang ? sanTang[sanTang.length - 1] : dien_tich_xay_dung;     // mái phủ trên sàn tầng trên cùng
+  // Diện tích quy đổi (cách nhà thầu VN báo giá): móng + từng sàn + mái + hiên/ban công, mỗi phần nhân hệ số
+  const quy_doi_chi_tiet: QuyDoiLine[] = [
+    { label: `Móng ${nenMong.foundation === 'coc' ? 'cọc' : nenMong.foundation === 'be' ? 'bè' : 'băng'}`, area: dien_tich_xay_dung, pct: Math.round(K_MONG * 100), converted: r1q(dien_tich_xay_dung * K_MONG) },
+    ...(sanTang || Array.from({ length: so_tang }, () => dien_tich_xay_dung)).map((a, i) => ({ label: `Sàn tầng ${i + 1}`, area: r1q(a), pct: 100, converted: r1q(a) })),
+    { label: `Mái ${({ ton: 'tôn', ngoi: 'ngói kèo thép', btct: 'bằng BTCT', thai_nhat: 'Thái / Nhật' } as any)[roof]}`, area: r1q(dt_mai), pct: Math.round(K_MAI * 100), converted: r1q(dt_mai * K_MAI) },
+    ...(dien_tich_hien > 0 ? [{ label: 'Hiên có mái, ban công', area: dien_tich_hien, pct: Math.round(K_HIEN * 100), converted: r1q(dien_tich_hien * K_HIEN) }] : [])
+  ];
+  const dien_tich_quy_doi = r1q(quy_doi_chi_tiet.reduce((n, l) => n + l.converted, 0));
   const so_phong_ngu = params.so_phong_ngu;
   const so_wc = Math.max(1, params.so_wc || (so_tang === 1 ? 2 : Math.max(so_tang, 2)));
   const co_san_vuon = params.co_san_vuon === true;   // mặc định KHÔNG tính sân vườn
@@ -1085,6 +1114,9 @@ export function calculateMasterProjectEstimate(params: {
     dien_tich_xay_dung,
     dien_tich_quy_doi,
     he_so_quy_doi: { mong: K_MONG, mai: K_MAI },
+    quy_doi_chi_tiet,
+    dien_tich_hien,
+    suat_san_su_dung_m2: Math.round(selectedResult.finalContractTotal / Math.max(1, dien_tich_san)),
     nen_mong: nenMong,
     loai_mai_tinh: roof,
     so_tang,
