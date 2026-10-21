@@ -3,7 +3,7 @@
  * kích thước đất → khoảng lùi trước/sau → diện tích xây dựng (phần nhà chiếm đất) → mật độ.
  */
 import { hasFreeSketch, planFreeLayout } from './sketchFreePlanner.js';
-import { specsToSketch } from './roomSpecs.js';
+import { specsToSketch, mergeSpecsIntoSketch, outKitchenOf, BEN_TO_CANH } from './roomSpecs.js';
 
 /** Khoảng lùi mặc định (m) khi khách không nhập — giống bộ vẽ mặt bằng */
 export function defaultSetbacks(lengthM: number): { front: number; back: number } {
@@ -102,8 +102,28 @@ export function roomsFor(ct: any): any {
   if (r.garage === true) r.parkingType = 'garage';
   else if (r.parkingType === 'garage') r.parkingType = 'yard';
   // Ô nhập từng phòng của gia chủ ưu tiên hơn ảnh / bản vẽ tay
-  const sk = specsToSketch(ct, houseWidthOf(ct));
-  if (sk) r.sketchLayout = sk;
+  // Có ảnh phác thảo (AI đã đọc lưới phòng) → ảnh quyết định bố cục, ô nhập chỉ bổ sung kích thước / hướng cho đúng phòng.
+  // Không có ảnh → dựng bố cục từ ô nhập.
+  const cur: any = r.sketchLayout;
+  const fromPhoto = cur && cur.nguon !== 'o_nhap' && cur.co_phac_thao !== false && Array.isArray(cur.tang)
+    && cur.tang.some((t: any) => (t.phong || []).filter((p: any) => Number.isFinite(Number(p.hang)) && Number.isFinite(Number(p.cot))).length >= 2);
+  if (fromPhoto) r.sketchLayout = mergeSpecsIntoSketch(cur, ct);
+  else { const sk = specsToSketch(ct, houseWidthOf(ct)); if (sk) r.sketchLayout = sk; }
+  // Bếp phụ đun củi (ô gia chủ chọn / mô tả có chữ "bếp củi") mà phác thảo chưa có → thêm bếp phụ + cửa phụ để bộ vẽ dựng lối ra
+  const ok = outKitchenOf(ct);
+  if (r.sketchLayout && typeof r.sketchLayout === 'object') {
+    const sl: any = r.sketchLayout;
+    const nn: any[] = Array.isArray(sl.ngoai_nha) ? sl.ngoai_nha : [];
+    const has = nn.some((o: any) => o?.loai === 'bep_phu');
+    if (ok.want && !has) {
+      const canh = BEN_TO_CANH[ok.ben];
+      const cua: any[] = Array.isArray(sl.cua) ? sl.cua : [];
+      r.sketchLayout = { ...sl, ngoai_nha: [...nn, { loai: 'bep_phu', canh }], cua: cua.some((c: any) => c?.ra === 'bep_phu') ? cua : [...cua.filter((c: any) => !(c?.loai === 'phu' && !c?.ra)), { loai: 'phu', ra: 'bep_phu', canh }] };
+    } else if (!ok.want && !ok.auto && has) {
+      // gia chủ chọn "Không có bếp phụ" → bỏ bếp phụ AI đọc từ ảnh
+      r.sketchLayout = { ...sl, ngoai_nha: nn.filter((o: any) => o?.loai !== 'bep_phu'), cua: (Array.isArray(sl.cua) ? sl.cua : []).map((c: any) => c?.ra === 'bep_phu' ? { ...c, ra: 'san' } : c) };
+    }
+  }
   if (r.garage !== true && r.sketchLayout && Array.isArray(r.sketchLayout.tang)) {
     r.sketchLayout = { ...r.sketchLayout, tang: r.sketchLayout.tang.map((t: any) => ({ ...t, phong: (t.phong || []).filter((p: any) => String(p.loai) !== 'gara') })) };
   }

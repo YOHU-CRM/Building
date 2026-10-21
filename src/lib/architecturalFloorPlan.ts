@@ -26,6 +26,8 @@ export interface FloorPlanParams {
   showSectorGrid?: boolean;
   frontSetbackM?: number | string;
   backSetbackM?: number | string;
+  /** 'all' = 1 hình (xem trên màn hình); 'plan' = chỉ mặt bằng phóng to hết khổ A4; 'notes' = chỉ bảng chữ (trang 2 của PDF) */
+  part?: 'all' | 'plan' | 'notes';
 }
 
 const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -51,6 +53,12 @@ function wrap(text: string, max: number): string[] {
   return lines;
 }
 
+const NOTES_PAGE_BREAK = '\n<!--YOHU-PAGE-BREAK-->\n';
+/** Trang thuyết minh (bảng phòng, phong thủy, kiểm tra…) — A4 dọc, chữ to, tự chia nhiều trang khi dài */
+export function generateArchitecturalNotesPages(params: FloorPlanParams): string[] {
+  return generateArchitecturalFloorPlanSvg({ ...params, part: 'notes' }).split(NOTES_PAGE_BREAK);
+}
+
 export function generateArchitecturalFloorPlanSvg(params: FloorPlanParams): string {
   const plan: FloorPlanResult = planFloor({
     widthM: params.widthM, lengthM: params.lengthM, floor: params.floor, totalFloors: params.totalFloors,
@@ -70,13 +78,19 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   const ctype = params.constructionType || 'Nhà ở';
 
   /* ── Bố cục trang ── */
-  const VW = 1120;
+  const part = params.part || 'all';
   const free = plan.mode === 'free';
   // Ranh đất: nhà ống = rộng W, từ sân trước đến sân sau; phác thảo tự do = ranh tính theo sân vườn quanh nhà
   const LOT = plan.lot || { x: 0, y: -FS, w: W, h: H + FS + BS };
   // Bố cục tự co giãn: khu đất dáng NGANG → hình vẽ rộng hết khổ phía trên, bảng chữ xếp 2 cột bên dưới (không bỏ trống giấy)
   const wide = LOT.w / LOT.h > 1.25;
-  const drawL = 70, drawT = 130, drawMaxW = wide ? 990 : 600, drawMaxH = wide ? 640 : 900;
+  // Trang "plan" của PDF: khu đất ngang → A4 NGANG, khu đất dọc → A4 DỌC; mặt bằng chiếm gần hết trang
+  const planLand = LOT.w / LOT.h >= 0.9;
+  const VW = part === 'plan' ? (planLand ? 1120 : 800) : part === 'notes' ? 800 : 1120;
+  const PAGE_H = part === 'plan' ? Math.round(planLand ? VW / 1.414 : VW * 1.414) : 0;
+  const drawL = part === 'plan' ? 40 : 70, drawT = part === 'plan' ? 110 : 130;
+  const drawMaxW = part === 'plan' ? VW - 2 * drawL - (planLand ? 0 : 20) : wide ? 990 : 600;
+  const drawMaxH = part === 'plan' ? PAGE_H - drawT - 96 : wide ? 640 : 900;
   const sc = Math.min(drawMaxW / (LOT.w + 0.0001), drawMaxH / LOT.h);
   const dW = LOT.w * sc, dH = LOT.h * sc;
   const ox = drawL + (drawMaxW - dW) / 2;
@@ -84,22 +98,27 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   const px = (x: number) => ox + (x - LOT.x) * sc;
   const py = (y: number) => oy + (LOT.y + LOT.h - y) * sc; // y = 0 mặt tiền nhà ở phía dưới
   const rx = (r: { x: number; y: number; w: number; h: number }) => ({ X: px(r.x), Y: py(r.y + r.h), Wd: r.w * sc, Ht: r.h * sc });
-  const fs = Math.max(9, Math.min(14, sc * 0.33));
+  const fs = part === 'plan' ? Math.max(13, Math.min(16, sc * 0.36)) : Math.max(10.5, Math.min(14, sc * 0.33));
 
   const out: string[] = [];
-  let panelX = wide ? 40 : 720, panelW = wide ? 510 : 380;
+  const pWide = wide && part !== 'notes';
+  let panelX = part === 'notes' ? 40 : pWide ? 40 : 720, panelW = part === 'notes' ? VW - 80 : pWide ? 510 : 380;
+  // cỡ chữ bảng thuyết minh: trang 2 của PDF to hơn để in A4 vẫn đọc rõ
+  const TF = part === 'notes' ? 14 : 12.5, TH = Math.round(TF * 1.38);
 
   /* ── Header ── */
   out.push(`<rect x="0" y="0" width="${VW}" height="96" fill="#0f172a"/>`);
   out.push(`<text x="28" y="40" fill="#fbbf24" font-size="13" font-weight="800" letter-spacing="2">YOHU CONSTECH · BẢN VẼ KIẾN TRÚC SƠ BỘ</text>`);
-  out.push(`<text x="28" y="70" fill="#fff" font-size="22" font-weight="900">MẶT BẰNG TẦNG ${plan.floor}/${plan.totalFloors} — ${esc(ctype.toUpperCase())}</text>`);
+  out.push(`<text x="28" y="${part === 'notes' ? 66 : 70}" fill="#fff" font-size="${part === 'notes' ? 20 : 22}" font-weight="900">${part === 'notes' ? 'THUYẾT MINH ' : ''}MẶT BẰNG TẦNG ${plan.floor}/${plan.totalFloors} — ${esc(ctype.toUpperCase())}</text>`);
   const houseMode = (params.rooms as any)?.dimsKind !== 'dat';
   const landIn = Number((params.rooms as any)?.landAreaM2) || 0;
-  out.push(`<text x="${VW - 28}" y="40" fill="#cbd5e1" font-size="12" text-anchor="end">${houseMode
+  if (part !== 'notes') out.push(`<text x="${VW - 28}" y="40" fill="#cbd5e1" font-size="12" text-anchor="end">${houseMode
     ? (landIn ? `Đất ${f1(landIn)} m² (gia chủ nhập) · khung vẽ là khu vực quanh nhà, không phải ranh đất` : `Khu vực vẽ ~${f1(LOT.w)} × ${f1(LOT.h)} m — minh họa quanh nhà, không phải ranh đất`)
     : `Lô đất ${free ? '~' : ''}${f1(LOT.w)} × ${f1(LOT.h)} m · ${f1(LOT.w * LOT.h)} m²`}</text>`);
-  out.push(`<text x="${VW - 28}" y="62" fill="#cbd5e1" font-size="12" text-anchor="end">Nhà ${f1(W)} × ${f1(H)} m · sàn ${f1(free ? plan.density.footprint : W * H)} m² · hướng ${esc(plan.facing)}</text>`);
-  out.push(`<text x="${VW - 28}" y="84" fill="#94a3b8" font-size="11" text-anchor="end">Gia chủ: ${esc(customer)}</text>`);
+  if (part === 'notes') out.push(`<text x="28" y="88" fill="#cbd5e1" font-size="12">Nhà ${f1(W)} × ${f1(H)} m · sàn ${f1(free ? plan.density.footprint : W * H)} m² · hướng ${esc(plan.facing)} · Gia chủ: ${esc(customer)}</text>`);
+  else out.push(`<text x="${VW - 28}" y="62" fill="#cbd5e1" font-size="12" text-anchor="end">Nhà ${f1(W)} × ${f1(H)} m · sàn ${f1(free ? plan.density.footprint : W * H)} m² · hướng ${esc(plan.facing)}</text>`);
+  if (part !== 'notes') out.push(`<text x="${VW - 28}" y="84" fill="#94a3b8" font-size="11" text-anchor="end">Gia chủ: ${esc(customer)}</text>`);
+  const headerLen = out.length;
 
   /* ── Ranh đất ── */
   out.push(`<rect x="${px(LOT.x)}" y="${py(LOT.y + LOT.h)}" width="${dW}" height="${dH}" fill="${free && !houseMode ? '#f7fee7' : '#ffffff'}" stroke="#64748b" stroke-width="1.2" stroke-dasharray="8 5"/>`);
@@ -313,10 +332,10 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     plan.grid.forEach(c => {
       const x = px((W / 3) * c.col) + 3, y = py((H / 3) * (c.row + 1)) + 10;
       const color = c.good === true ? '#15803d' : c.good === false ? '#dc2626' : '#7c3aed';
-      const gfs = Math.max(7.5, Math.min(10, (W / 3) * sc / 9));
+      const gfs = Math.max(9, Math.min(11, (W / 3) * sc / 9));
       if (free) {
         // nhà vườn: phòng thấp → ghi 1 dòng nhỏ, mờ ở góc ô để không đè tên phòng
-        out.push(`<text x="${x}" y="${y - 1}" font-size="${Math.min(8.5, gfs)}" font-weight="700" fill="${color}" opacity="0.85" ${halo}>${esc(c.direction)}${c.star && c.direction !== 'Trung cung' ? ' · ' + esc(c.star) : ''}</text>`);
+        out.push(`<text x="${x}" y="${y - 1}" font-size="${part === 'plan' ? 11.5 : Math.max(9.5, Math.min(10, gfs))}" font-weight="700" fill="${color}" opacity="0.9" ${halo}>${esc(c.direction)}${c.star && c.direction !== 'Trung cung' ? ' · ' + esc(c.star) : ''}</text>`);
         return;
       }
       out.push(`<text x="${x}" y="${y}" font-size="${gfs}" font-weight="800" fill="${color}" ${halo}>${esc(c.direction)}</text>`);
@@ -422,29 +441,33 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   }
 
   /* ── Mũi tên Bắc ── */
-  const nx = wide ? Math.min(px(LOT.x + LOT.w) - 34, VW - 40) : (px(LOT.x + LOT.w) + 50 > panelX - 40 ? drawL + drawMaxW - 30 : px(LOT.x + LOT.w) + 50), ny = drawT + 40;
+  const nx = part === 'plan' ? VW - 46 : wide ? Math.min(px(LOT.x + LOT.w) - 34, VW - 40) : (px(LOT.x + LOT.w) + 50 > panelX - 40 ? drawL + drawMaxW - 30 : px(LOT.x + LOT.w) + 50), ny = drawT + 40;
   out.push(`<g transform="translate(${nx} ${ny}) rotate(${plan.northPageDeg})"><circle r="24" fill="#fff" stroke="#0f172a" stroke-width="1.2"/><path d="M 0 -20 L 7 8 L 0 3 L -7 8 Z" fill="#dc2626"/><text y="-26" font-size="12" font-weight="900" text-anchor="middle" fill="#0f172a">B</text></g>`);
 
   /* ── Bảng bên phải ── */
-  const panelTop = wide ? bottom + 84 : drawT;
+  const panelTop = part === 'notes' ? 124 : wide ? bottom + 84 : drawT;
   let y = panelTop;
   let col1Bottom = 0;
   const P: string[] = [];
-  const head = (t: string) => { P.push(`<rect x="${panelX}" y="${y}" width="${panelW}" height="24" fill="#0f172a"/><text x="${panelX + 10}" y="${y + 16}" font-size="12" font-weight="800" fill="#fbbf24">${esc(t)}</text>`); y += 40; };
-  const line = (t: string, color = '#0f172a', bold = false, max = Math.floor(panelW / 6.4)) => {
-    wrap(t, max).forEach(l => { P.push(`<text x="${panelX + 10}" y="${y}" font-size="11" fill="${color}" ${bold ? 'font-weight="700"' : ''}>${esc(l)}</text>`); y += 15; });
+  // Trang thuyết minh A4 dọc: tự sang trang khi hết chỗ (không cắt đôi dòng chữ)
+  const NPH = Math.round(VW * 1.414);
+  const ensure = (h: number) => { if (part !== 'notes') return; const k = Math.floor(y / NPH); if (y + h > (k + 1) * NPH - 56) y = (k + 1) * NPH + 56; };
+  const head = (t: string) => { ensure(TF + 32 + TH); P.push(`<rect x="${panelX}" y="${y}" width="${panelW}" height="${TF + 14}" fill="#0f172a"/><text x="${panelX + 10}" y="${y + TF + 4}" font-size="${TF + 1}" font-weight="800" fill="#fbbf24">${esc(t)}</text>`); y += TF + 32; };
+  const line = (t: string, color = '#0f172a', bold = false, max = Math.floor(panelW / (TF * (part === 'notes' ? 0.5 : 0.56)))) => {
+    wrap(t, max).forEach(l => { ensure(TH); P.push(`<text x="${panelX + 10}" y="${y}" font-size="${TF}" fill="${color}" ${bold ? 'font-weight="700"' : ''}>${esc(l)}</text>`); y += TH; });
   };
 
   head('BẢNG PHÒNG');
   const sched = inside.filter(r => r.name && r.type !== 'corridor');
   sched.forEach(r => {
+    ensure(TH);
     const mark = r.good === true ? '●' : r.good === false ? '●' : '○';
     const col = r.good === true ? '#15803d' : r.good === false ? '#dc2626' : '#7c3aed';
-    P.push(`<text x="${panelX + 10}" y="${y}" font-size="11" fill="${col}">${mark}</text>`);
-    P.push(`<text x="${panelX + 24}" y="${y}" font-size="11" fill="#0f172a">${esc(r.name)}</text>`);
-    P.push(`<text x="${panelX + 240}" y="${y}" font-size="11" fill="#475569">${f1(r.w * r.h)} m²</text>`);
-    P.push(`<text x="${panelX + panelW - 8}" y="${y}" font-size="10" fill="${col}" text-anchor="end">${esc(r.sector === 'Trung cung' ? 'Trung cung' : (r.star || r.sector || ''))}</text>`);
-    y += 15;
+    P.push(`<text x="${panelX + 10}" y="${y}" font-size="${TF}" fill="${col}">${mark}</text>`);
+    P.push(`<text x="${panelX + 24}" y="${y}" font-size="${TF}" fill="#0f172a">${esc(r.name)}</text>`);
+    P.push(`<text x="${panelX + (part === 'notes' ? 420 : 240)}" y="${y}" font-size="${TF}" fill="#475569">${f1(r.w * r.h)} m²</text>`);
+    P.push(`<text x="${panelX + panelW - 8}" y="${y}" font-size="${TF - 1}" fill="${col}" text-anchor="end">${esc(r.sector === 'Trung cung' ? 'Trung cung' : (r.star || r.sector || ''))}</text>`);
+    y += TH;
   });
   y += 8;
   if (plan.sketchNotes && plan.sketchNotes.length) {
@@ -457,7 +480,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
     plan.advice.forEach((n, k) => { line(`${k + 1}. ${n}`, plan.adviceApplied ? '#15803d' : '#1d4ed8'); y += 2; });
     y += 6;
   }
-  if (wide) { col1Bottom = y; panelX = 580; y = panelTop; }   // sang cột 2
+  if (pWide) { col1Bottom = y; panelX = 580; y = panelTop; }   // sang cột 2
   head('PHONG THỦY BỐ TRÍ');
   plan.fengShuiNotes.forEach(n => { line('• ' + n); y += 2; });
   y += 6;
@@ -470,10 +493,20 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
   if (free) line('Nét đứt xanh: lối vào của khách · nét đứt cam: lối ra bếp phụ · nét đứt xám: ô mở thông giữa các không gian chung.', '#334155');
   line('Bản vẽ sơ bộ phục vụ tư vấn. Cần KTS/KS lập hồ sơ thiết kế kỹ thuật, khảo sát hiện trạng trước khi thi công & xin phép xây dựng.', '#64748b');
 
-  const contentBottom = Math.max(bottom + 70, y + 10, col1Bottom + 10);
-  const VH = Math.ceil(contentBottom + 40);
-  const footer = `<rect x="0" y="${VH - 30}" width="${VW}" height="30" fill="#f1f5f9"/><text x="28" y="${VH - 11}" font-size="10.5" fill="#475569">Yohu ConsTech · ${new Date().toLocaleDateString('vi-VN')} · Tỷ lệ minh họa (1 ô lưới = 1/3 chiều nhà) · Kích thước tính theo tim tường, đơn vị m</text>`;
+  const contentBottom = part === 'plan' ? bottom + 70 : part === 'notes' ? Math.max(y + 10, col1Bottom + 10) : Math.max(bottom + 70, y + 10, col1Bottom + 10);
+  const VH = part === 'plan' ? Math.max(PAGE_H, Math.ceil(contentBottom + 40)) : Math.ceil(contentBottom + 40);
+  const footer = `<rect x="0" y="${VH - 30}" width="${VW}" height="30" fill="#f1f5f9"/><text x="28" y="${VH - 11}" font-size="11.5" fill="#475569">Yohu ConsTech · ${new Date().toLocaleDateString('vi-VN')} · Tỷ lệ minh họa (1 ô lưới = 1/3 chiều nhà) · Kích thước tính theo tim tường, đơn vị m</text>`;
 
+  if (part === 'notes') {
+    const pages = Math.floor((y + 10) / NPH) + 1;
+    const foot = (k: number) => `<rect x="0" y="${(k + 1) * NPH - 30}" width="${VW}" height="30" fill="#f1f5f9"/><text x="28" y="${(k + 1) * NPH - 11}" font-size="11.5" fill="#475569">Yohu ConsTech · ${new Date().toLocaleDateString('vi-VN')} · Thuyết minh tầng ${plan.floor}${pages > 1 ? ` · trang ${k + 1}/${pages}` : ''}</text>`;
+    return Array.from({ length: pages }, (_, k) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 ${k * NPH} ${VW} ${NPH}" width="${VW}" height="${NPH}" font-family="Arial, 'Helvetica Neue', sans-serif">
+<rect x="0" y="${k * NPH}" width="${VW}" height="${NPH}" fill="#ffffff"/>
+${k === 0 ? out.slice(0, headerLen).join('\n') : ''}
+${P.join('\n')}
+${foot(k)}
+</svg>`).join(NOTES_PAGE_BREAK);
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VW} ${VH}" width="${VW}" height="${VH}" font-family="Arial, 'Helvetica Neue', sans-serif">
 <defs>
   <marker id="arrowR" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/></marker>
@@ -481,7 +514,7 @@ export function renderPlanSvg(plan: FloorPlanResult, params: Partial<FloorPlanPa
 </defs>
 <rect x="0" y="0" width="${VW}" height="${VH}" fill="#ffffff"/>
 ${out.join('\n')}
-${P.join('\n')}
+${part === 'plan' ? '' : P.join('\n')}
 ${footer}
 </svg>`;
 }
