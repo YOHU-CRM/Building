@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { listRoomSlots, specOf, specFilled, RoomSpec } from '../lib/roomSpecs';
+import { listRoomSlots, specOf, specFilled, RoomSpec, sideCompass, outKitchenOf } from '../lib/roomSpecs';
 import { tx, txRoom } from '../lib/i18nExtra';
 
 /**
@@ -11,11 +11,15 @@ interface Props {
   constructionInfo: any;
   setConstructionInfo: (fn: (prev: any) => any) => void;
   lang?: string;
+  /** hướng nhà (hướng cửa chính) — để ghi kèm hướng thật cho "bên trái / bên phải" */
+  facing?: string;
 }
 
 const DIRS = ['Bắc', 'Đông Bắc', 'Đông', 'Đông Nam', 'Nam', 'Tây Nam', 'Tây', 'Tây Bắc'];
 
-export default function RoomRequirementsPanel({ theme, constructionInfo, setConstructionInfo, lang = 'vi' }: Props) {
+export default function RoomRequirementsPanel({ theme, constructionInfo, setConstructionInfo, lang = 'vi', facing }: Props) {
+  // bên trái / phải = đứng TRONG nhà nhìn ra cửa chính; ghi kèm hướng thật nếu đã biết hướng nhà
+  const cp = (b: 'trai' | 'phai' | 'sau') => { const d = sideCompass(facing, b); return d ? ` (${lang === 'vi' ? 'phía ' + d : tx(lang, d)})` : ''; };
   const T = (v: string, vars?: Record<string, string | number>) => tx(lang, v, vars);
   const dark = theme === 'dark';
   const ct = constructionInfo || {};
@@ -56,6 +60,19 @@ export default function RoomRequirementsPanel({ theme, constructionInfo, setCons
         <div className={`text-xs sm:text-sm font-black ${dark ? 'text-amber-400' : 'text-amber-700'}`}>{T('📐 Yêu cầu từng phòng (không bắt buộc)')}</div>
         <div className="text-[11px] text-slate-400">{T('Đã nhập {a}/{b} phòng · phòng chưa nhập: tool tự bố trí theo phong thủy', { a: filledCount, b: slots.length })}</div>
       </div>
+      {(() => {
+        const ok = outKitchenOf(ct);
+        const cur = ct.rooms?.outKitchen || (ok.want ? 'sau' : 'khong');
+        const setOk = (v: string) => setConstructionInfo((prev: any) => ({ ...prev, rooms: { ...(prev.rooms || {}), outKitchen: v } }));
+        return (
+          <div className="mb-2">
+            <div className="text-[11px] font-bold text-slate-400 mb-1">{T('🔥 Bếp phụ đun củi ngoài nhà')}{ok.auto && ok.want ? <span className="text-emerald-500"> · {T('tự nhận từ mô tả (có chữ "bếp củi / bếp phụ")')}</span> : null}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {(['khong', 'sau', 'trai', 'phai'] as const).map(v => <button key={v} type="button" className={seg(cur === v)} onClick={() => setOk(v)}>{T({ khong: 'Không có', sau: 'Phía sau nhà', trai: 'Bên trái', phai: 'Bên phải' }[v])}{v !== 'khong' ? cp(v) : ''}</button>)}
+            </div>
+          </div>
+        );
+      })()}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {slots.map(s => {
           const sp = specOf(ct, s.key);
@@ -91,12 +108,12 @@ export default function RoomRequirementsPanel({ theme, constructionInfo, setCons
             </div>
             {d > 0 && r > 0 && <div className="text-xs text-slate-400">{T('Diện tích yêu cầu:')} <b>{Math.round(d * r * 10) / 10} m²</b></div>}
             <div>
-              <div className="text-[11px] font-bold text-slate-400 mb-1">{T('Vị trí trong nhà (đứng ngoài đường nhìn vào cửa chính)')}</div>
+              <div className="text-[11px] font-bold text-slate-400 mb-1">{T('Vị trí trong nhà (trái / phải: đứng trong nhà nhìn ra cửa chính)')}</div>
               <div className="flex flex-wrap gap-1.5 mb-1.5">
                 {(['truoc', 'giua', 'sau'] as const).map(v => <button key={v} type="button" className={seg(sp.vi_tri === v)} onClick={() => update(s.key, { vi_tri: sp.vi_tri === v ? undefined : v })}>{T({ truoc: 'Phía trước', giua: 'Giữa nhà', sau: 'Phía sau' }[v])}</button>)}
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {(['trai', 'giua', 'phai'] as const).map(v => <button key={v} type="button" className={seg(sp.ben === v)} onClick={() => update(s.key, { ben: sp.ben === v ? undefined : v })}>{T({ trai: 'Bên trái', giua: 'Ở giữa', phai: 'Bên phải' }[v])}</button>)}
+                {(['trai', 'giua', 'phai'] as const).map(v => <button key={v} type="button" className={seg(sp.ben === v)} onClick={() => update(s.key, { ben: sp.ben === v ? undefined : v })}>{T({ trai: 'Bên trái', giua: 'Ở giữa', phai: 'Bên phải' }[v])}{v !== 'giua' ? cp(v) : ''}</button>)}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
