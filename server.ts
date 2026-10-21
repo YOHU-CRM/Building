@@ -3002,7 +3002,7 @@ Trích xuất thông tin công trình thành một đối tượng JSON THUẦN 
     "huong_mat_tien": "hướng cửa chính ghi trên bản vẽ (vd: Nam) hoặc rỗng",
     "vi_tri_thang": "trai | phai | giua | khong_ro",
     "nha": { "rong": null, "sau": null },
-    "luoi": { "so_hang": 3, "so_cot": 4 },
+    "luoi": { "so_hang": 3, "so_cot": 4, "cot_ty_le": [0.23, 0.25, 0.24, 0.28], "hang_ty_le": [0.27, 0.4, 0.33] },
     "tang": [
       { "tang": 1, "phong": [ {
         "loai": "khach | an | bep | ngu | wc | tho | doc_sach | lam_viec | sinh_hoat | kho | sanh | hanh_lang | hien | gara | thang | gieng_troi | san",
@@ -3025,12 +3025,13 @@ Trích xuất thông tin công trình thành một đối tượng JSON THUẦN 
 }
 
 QUY TẮC ƯU TIÊN:
-0. "trai/phai" tính theo người ĐỨNG NGOÀI ĐƯỜNG NHÌN VÀO MẶT TIỀN. "truoc" = phía mặt đường, "sau" = phía cuối đất.
+0. Trong JSON, "trai/phai" (canh, ben, vi_tri_thang, cột lưới) tính theo người ĐỨNG NGOÀI ĐƯỜNG NHÌN VÀO MẶT TIỀN. "truoc" = phía mặt đường, "sau" = phía cuối đất.
+0a. CHỮ "bên trái / bên phải" GIA CHỦ GÕ TRONG MÔ TẢ là theo người ĐỨNG TRONG NHÀ NHÌN RA MẶT TIỀN CHÍNH (cách nói thông thường của gia chủ Việt Nam, "tả Thanh Long – hữu Bạch Hổ") → khi ghi vào JSON phải ĐỔI NGƯỢC: gia chủ ghi "bên trái" → "phai"; "bên phải" → "trai". Gia chủ ghi hướng (Đông/Tây/Nam/Bắc) thì giữ nguyên hướng, đặt đúng phía có hướng đó.
 0b. Sổ đỏ: đọc kích thước từng cạnh trên sơ đồ thửa đất → "kich_thuoc_dat" (cạnh giáp đường = rong_truoc, cạnh cuối = rong_sau). Rộng sau > rộng trước = "no_hau"; nhỏ hơn = "top_hau".
 0c. Bản vẽ tay / phác thảo → "bo_tri_phac_thao" (co_phac_thao = true). Không có phác thảo thì để mảng "tang" rỗng. Đọc theo các bước:
    (1) TÌM CỬA CHÍNH trước (chữ "Cửa chính", "CC", mũi tên vào nhà, chữ hướng "H Nam", "Hướng Đông"...). Phía có cửa chính = "truoc". Ghi hướng vào "huong_mat_tien".
    (2) XOAY NHẬN THỨC cho đúng: dù trên giấy cửa chính nằm ở cạnh dưới, cạnh trên hay cạnh hông, luôn quy về người ĐỨNG NGOÀI NHÌN VÀO CỬA CHÍNH. Hàng 0 = sát cửa chính, hàng tăng dần vào trong. Cột 0 = bên TRÁI của người đó. (Cửa chính ở cạnh dưới tờ giấy → trái giấy = trái. Cửa chính ở cạnh trên → phải giấy = trái.)
-   (3) CHIA LƯỚI theo các NÉT LIỀN chia phòng (tường). Mỗi phòng ghi "hang","cot" (ô góc trước-trái của phòng), "so_hang","so_cot" (số ô chiếm). Phòng lớn chiếm nhiều ô. "luoi" = tổng số hàng/cột. Ô không có chữ = để trống (tool tự làm sảnh / lối đi).
+   (3) CHIA LƯỚI theo các NÉT LIỀN chia phòng (tường). Mỗi phòng ghi "hang","cot" (ô góc trước-trái của phòng), "so_hang","so_cot" (số ô chiếm). Phòng lớn chiếm nhiều ô. "luoi" = tổng số hàng/cột. Ô không có chữ = để trống (tool tự làm sảnh / lối đi). ĐO TỈ LỆ NÉT VẼ: "cot_ty_le" = bề ngang từng cột (từ cột 0 sang phải) tính theo phần của tổng chiều ngang nét vẽ (đo khoảng cách giữa các nét liền dọc trên giấy), "hang_ty_le" = chiều sâu từng hàng (từ hàng 0 vào trong) theo phần của tổng chiều sâu nét vẽ, kể cả hàng nhô ra phía trước. Số phần tử đúng bằng so_cot / so_hang, tổng ≈ 1. Đo theo nét vẽ, không tính từ diện tích ghi tay. Nét quá nguệch ngoạc không đo được thì bỏ trống 2 mảng này.
    (4) "kieu" = "tu_do" khi nhà ngang rộng, nhà vườn, nhà cấp 4, bố cục không phải nhà ống; "nha_ong" khi nhà hẹp sâu chia dải trước–sau.
    (5) CHỮ VIẾT TẮT / VIẾT NGOÁY hay gặp: "P." = phòng; "PK", "P.K", "Khách" = khach; "PN", "P.N", "Ngủ" = ngu; "WC", "VS", "Vệ sinh", "Tắm" = wc; "B", "Bếp" = bep; "Thờ", "PT", "Gia tiên" = tho; "Đọc sách", "Thư viện", "ĐS" = doc_sach; "LV" = lam_viec; "SH" = sinh_hoat; "Bàn ăn", "Ăn" = an; "Hiên", "Mái hiên" = hien; "Tủ giày", "Áo mũ" = sanh (sảnh vào nhà); "Bếp củi", "Bếp phụ", "Bếp đun" ngoài nhà = ngoai_nha bep_phu; "Giếng" = gieng; "Ao", "Hồ" = ao; "Cây xanh", "Vườn" = vuon/cay_xanh; "Đường vào", "Lối vào" = loi_vao.
    (6) SỐ: "25m2", "25m²", "25 m" cạnh tên phòng = "dien_tich" (m²). Số có "m" ghi dọc cạnh nhà (vd "10m") = kích thước nhà → "nha.sau" (cạnh vuông góc mặt tiền) hoặc "nha.rong" (cạnh song song mặt tiền). Nhà xây theo khổ đất ghi trên bản vẽ; đất thừa là sân vườn.
