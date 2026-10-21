@@ -3,7 +3,7 @@ import makerjs from 'makerjs';
 import { Download, Layers, ShieldAlert, FileText, Eye, Compass } from 'lucide-react';
 import { exportSvgToPdf } from '../lib/pdfExporter';
 import { tinhQuyTacPhongThuyPhong } from '../lib/fengshuiRoomRules';
-import { generateArchitecturalFloorPlanSvg } from '../lib/architecturalFloorPlan';
+import { generateArchitecturalFloorPlanSvg, generateArchitecturalNotesPages } from '../lib/architecturalFloorPlan';
 import { planFloor } from '../lib/architectPlanner';
 
 interface FloorPlan2DViewerProps {
@@ -153,8 +153,11 @@ export default function FloorPlan2DViewer({
       const titles: string[] = [];
       
       // Gather all architectural floor plans
-      for (let i = 1; i <= totalFloors; i++) {
-        const floorSvg = generateArchitecturalFloorPlanSvg({
+      // Mỗi tầng 2 trang A4: trang mặt bằng phóng to hết khổ + trang thuyết minh (bảng phòng, phong thủy, kiểm tra) chữ to
+      for (let i = 1; i <= totalFloors; i++) for (const part of ['plan', 'notes'] as const) {
+        const gen = part === 'plan' ? (p: any) => [generateArchitecturalFloorPlanSvg(p)] : generateArchitecturalNotesPages;
+        const floorSvgs = gen({
+          part,
           widthM,
           lengthM,
           floor: i,
@@ -168,8 +171,7 @@ export default function FloorPlan2DViewer({
           requestedBedrooms: rooms?.bedroomCount,
           requestedBathrooms: rooms?.bathroomCount
         });
-        svgSources.push(floorSvg);
-        titles.push(`Bản Vẽ Mặt Bằng Kiến Trúc Tầng ${i}`);
+        floorSvgs.forEach(sv => { svgSources.push(sv); titles.push(part === 'plan' ? `Bản Vẽ Mặt Bằng Kiến Trúc Tầng ${i}` : `Thuyết Minh Mặt Bằng Tầng ${i}`); });
       }
       
       // If elevation element exists, serialize and append
